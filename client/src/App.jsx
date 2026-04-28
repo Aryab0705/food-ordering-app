@@ -477,7 +477,7 @@ function App() {
       console.log('Razorpay payment response:', paymentResponse);
 
       // Step 2: once Razorpay returns success, verify the payment signature on the server.
-      const verificationResponse = await apiRequest('/verify-payment', {
+      const verificationResponse = await apiRequest('/api/verify-payment', {
         method: 'POST',
         token,
         body: paymentResponse,
