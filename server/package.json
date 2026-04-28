@@ -1,0 +1,21 @@
+{
+  "name": "college-food-ordering-server",
+  "version": "1.0.0",
+  "description": "Backend API for the College Food Ordering System",
+  "main": "src/server.js",
+  "type": "commonjs",
+  "scripts": {
+    "dev": "node --watch src/server.js",
+    "start": "node src/server.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.2",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^5.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.19.1",
+    "nodemailer": "^8.0.4",
+    "razorpay": "^2.9.6"
+  }
+}

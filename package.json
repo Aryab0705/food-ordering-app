@@ -1,0 +1,14 @@
+{
+  "name": "food_ordering_app",
+  "version": "1.0.0",
+  "description": "College Food Ordering System using the MERN stack",
+  "private": true,
+  "scripts": {
+    "server": "npm --prefix server run dev",
+    "client": "npm --prefix client run dev",
+    "server:start": "npm --prefix server start",
+    "client:build": "npm --prefix client run build"
+  },
+  "license": "ISC",
+  "type": "commonjs"
+}
