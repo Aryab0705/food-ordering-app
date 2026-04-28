@@ -20,7 +20,10 @@ app.get('/api/health', (req, res) => {
 
 app.use(
   cors({
-    origin: true,
+    origin: [
+      'http://localhost:5173',
+      'https://campus-canteen-hub.vercel.app'
+    ],
     credentials: true,
   })
 );
