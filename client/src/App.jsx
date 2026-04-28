@@ -154,7 +154,7 @@ function App() {
     try {
       const [cartData, orderData, bookmarkData] = await Promise.all([
         apiRequest('/api/cart', { token }),
-        apiRequest('/orders/student', { token }),
+        apiRequest('/api/orders/student', { token }),
         apiRequest('/api/auth/bookmarks', { token }),
       ]);
 
@@ -196,7 +196,7 @@ function App() {
     try {
       const [itemData, orderData] = await Promise.all([
         apiRequest('/api/foods/vendor', { token }),
-        apiRequest(`/orders/vendor?date=${vendorOrdersDate}`, { token }),
+        apiRequest(`/api/orders/vendor?date=${vendorOrdersDate}`, { token }),
       ]);
 
       setVendorItems(itemData);
@@ -214,7 +214,7 @@ function App() {
     }
 
     try {
-      const orderData = await apiRequest('/orders/student', { token });
+      const orderData = await apiRequest('/api/orders/student', { token });
       setOrders(orderData);
     } catch (apiError) {
       console.error('Student order refresh failed:', apiError);
@@ -227,7 +227,7 @@ function App() {
     }
 
     try {
-      const orderData = await apiRequest(`/orders/vendor?date=${vendorOrdersDate}`, { token });
+      const orderData = await apiRequest(`/api/orders/vendor?date=${vendorOrdersDate}`, { token });
       setOrders(orderData);
     } catch (apiError) {
       console.error('Vendor order refresh failed:', apiError);
@@ -633,7 +633,7 @@ function App() {
 
   const handleUpdateOrderStatus = async (id, status) => {
     try {
-      const updatedOrder = await apiRequest(`/orders/${id}/status`, {
+      const updatedOrder = await apiRequest(`/api/orders/${id}/status`, {
         method: 'PUT',
         token,
         body: { status },
@@ -667,7 +667,7 @@ function App() {
         }))
         .filter((item) => item.quantity > 0);
 
-      const updatedOrder = await apiRequest(`/orders/${orderId}`, {
+      const updatedOrder = await apiRequest(`/api/orders/${orderId}`, {
         method: 'PUT',
         token,
         body: { items },
@@ -696,7 +696,7 @@ function App() {
     }
 
     try {
-      const updatedOrder = await apiRequest(`/orders/${orderId}/cancel`, {
+      const updatedOrder = await apiRequest(`/api/orders/${orderId}/cancel`, {
         method: 'PUT',
         token,
       });
