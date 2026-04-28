@@ -134,7 +134,7 @@ function App() {
     setMenuLoading(true);
 
     try {
-      const data = await apiRequest('/foods');
+      const data = await apiRequest('/api/foods');
       setMenuItems(data);
     } catch (apiError) {
       showError(apiError.message);
@@ -195,7 +195,7 @@ function App() {
 
     try {
       const [itemData, orderData] = await Promise.all([
-        apiRequest('/foods/vendor', { token }),
+        apiRequest('/api/foods/vendor', { token }),
         apiRequest(`/orders/vendor?date=${vendorOrdersDate}`, { token }),
       ]);
 
@@ -558,7 +558,7 @@ function App() {
     setVendorSaving(true);
 
     try {
-      const createdItem = await apiRequest('/foods', {
+      const createdItem = await apiRequest('/api/foods', {
         method: 'POST',
         token,
         body: payload,
@@ -577,7 +577,7 @@ function App() {
     setVendorSaving(true);
 
     try {
-      const updatedItem = await apiRequest(`/foods/${id}`, {
+      const updatedItem = await apiRequest(`/api/foods/${id}`, {
         method: 'PUT',
         token,
         body: payload,
@@ -599,7 +599,7 @@ function App() {
     setVendorSaving(true);
 
     try {
-      await apiRequest(`/foods/${id}`, {
+      await apiRequest(`/api/foods/${id}`, {
         method: 'DELETE',
         token,
       });
@@ -617,7 +617,7 @@ function App() {
     setVendorSaving(true);
 
     try {
-      const seededItems = await apiRequest('/foods/seed', {
+      const seededItems = await apiRequest('/api/foods/seed', {
         method: 'POST',
         token,
       });
