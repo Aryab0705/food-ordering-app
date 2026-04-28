@@ -6,14 +6,37 @@ const getRazorpayClient = require('../utils/razorpayClient');
 const { isRazorpayConfigured } = require('../utils/razorpayClient');
 const asyncHandler = require('../utils/asyncHandler');
 
-const buildCartItems = (cart) =>
-  cart.map((cartItem) => ({
+const toValidNumber = (value) => {
+  const normalizedValue = Number(value);
+  return Number.isFinite(normalizedValue) ? normalizedValue : NaN;
+};
+
+const normalizeCartItem = (cartItem) => {
+  const price = toValidNumber(cartItem.food?.price);
+  const quantity = toValidNumber(cartItem.quantity);
+
+  if (!cartItem.food?._id || !cartItem.food?.name || !cartItem.food?.vendor) {
+    throw new Error('Cart contains an incomplete food item. Please refresh the cart and try again.');
+  }
+
+  if (!Number.isFinite(price) || !Number.isFinite(quantity) || quantity <= 0) {
+    throw new Error(`Cart contains invalid pricing data for ${cartItem.food.name}. Please refresh the cart and try again.`);
+  }
+
+  return {
     food: cartItem.food._id,
     name: cartItem.food.name,
-    price: cartItem.food.price,
-    quantity: cartItem.quantity,
+    price,
+    quantity,
     vendor: cartItem.food.vendor,
-  }));
+  };
+};
+
+const buildCartItems = (cart) =>
+  cart.map(normalizeCartItem);
+
+const calculateTotalAmount = (items) =>
+  items.reduce((sum, item) => sum + item.price * item.quantity, 0);
 
 const createOrderGroups = (items) =>
   Object.values(
@@ -46,13 +69,17 @@ const getCartSnapshot = async (userId) => {
     return null;
   }
 
+  const items = buildCartItems(validCartItems);
+  const totalAmount = calculateTotalAmount(items);
+
+  if (!Number.isFinite(totalAmount) || totalAmount <= 0) {
+    throw new Error('Cart total could not be calculated. Please refresh the cart and try again.');
+  }
+
   return {
     user,
-    items: buildCartItems(validCartItems),
-    totalAmount: validCartItems.reduce(
-      (sum, item) => sum + item.food.price * item.quantity,
-      0,
-    ),
+    items,
+    totalAmount,
   };
 };
 
@@ -83,10 +110,7 @@ const createPlatformOrders = async ({
       Order.create({
         student: studentId,
         items: groupedItems,
-        totalAmount: groupedItems.reduce(
-          (sum, item) => sum + item.price * item.quantity,
-          0,
-        ),
+        totalAmount: calculateTotalAmount(groupedItems),
         paymentStatus,
         paymentId,
         orderId,
