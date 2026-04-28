@@ -10,6 +10,9 @@ const vendorReviewRoutes = require('./routes/vendorReviewRoutes');
 const { errorHandler, notFound } = require('./middleware/errorMiddleware');
 
 const app = express();
+app.get("/", (req, res) => {
+  res.send("Backend root working");
+});
 
 app.use(
   cors({
