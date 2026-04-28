@@ -153,7 +153,7 @@ function App() {
 
     try {
       const [cartData, orderData, bookmarkData] = await Promise.all([
-        apiRequest('/cart', { token }),
+        apiRequest('/api/cart', { token }),
         apiRequest('/orders/student', { token }),
         apiRequest('/api/auth/bookmarks', { token }),
       ]);
@@ -413,7 +413,7 @@ function App() {
 
   const handleAddToCart = async (foodId) => {
     try {
-      const data = await apiRequest('/cart', {
+      const data = await apiRequest('/api/cart', {
         method: 'POST',
         token,
         body: { foodId, quantity: 1 },
@@ -436,7 +436,7 @@ function App() {
 
   const handleUpdateCartItem = async (foodId, quantity) => {
     try {
-      const data = await apiRequest(`/cart/${foodId}`, {
+      const data = await apiRequest(`/api/cart/${foodId}`, {
         method: 'PUT',
         token,
         body: { quantity },
