@@ -485,7 +485,7 @@ function App() {
       console.log('Razorpay verify-payment response:', verificationResponse);
 
       // Step 3: save the actual food orders only after the payment is verified.
-      const createdOrders = await apiRequest('/save-order', {
+      const createdOrders = await apiRequest('/api/save-order', {
         method: 'POST',
         token,
         body: {
@@ -528,7 +528,7 @@ function App() {
     setPaymentFailed(false);
 
     try {
-      const createdOrders = await apiRequest('/save-cash-order', {
+      const createdOrders = await apiRequest('/api/save-cash-order', {
         method: 'POST',
         token,
       });
