@@ -2,7 +2,15 @@ const Order = require('../models/Order');
 const User = require('../models/User');
 const VendorReview = require('../models/VendorReview');
 const asyncHandler = require('../utils/asyncHandler');
-
+const calculateTotalAmount = (items) => {
+  return items.reduce(
+    (sum, item) =>
+      sum +
+      (Number(item?.price || item?.food?.price || 0) *
+        Number(item?.quantity || 1)),
+    0
+  );
+};
 const getItemStatus = (item, fallbackStatus = 'pending') => item.status || fallbackStatus;
 
 const deriveOrderStatus = (items, fallbackStatus = 'pending') => {
@@ -71,8 +79,7 @@ const splitLegacyOrder = async (order) => {
     const createdOrder = await Order.create({
       student: plainOrder.student,
       items,
-      totalAmount: items.reduce((sum, item) => sum + item.price * item.quantity, 0),
-      status: deriveOrderStatus(items, plainOrder.status),
+totalAmount: calculateTotalAmount(items),      status: deriveOrderStatus(items, plainOrder.status),
     });
 
     await Order.findByIdAndUpdate(createdOrder._id, {
@@ -116,8 +123,7 @@ const sanitizeOrder = (order) => {
     ...plainOrder,
     items: visibleItems,
     status: deriveOrderStatus(visibleItems, plainOrder.status),
-    totalAmount: visibleItems.reduce((sum, item) => sum + item.price * item.quantity, 0),
-  };
+totalAmount: calculateTotalAmount(visibleItems),  };
 };
 
 const attachVendorRatings = async (orders, studentId) => {
@@ -321,10 +327,7 @@ const updateStudentOrder = asyncHandler(async (req, res) => {
       return item;
     });
     order.status = deriveOrderStatus(order.items, order.status);
-    order.totalAmount = order.items.reduce(
-      (sum, item) => sum + item.price * item.quantity,
-      0,
-    );
+    order.totalAmount = calculateTotalAmount(order.items);
   }
 
   await order.save();
