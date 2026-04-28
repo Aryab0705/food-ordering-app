@@ -155,7 +155,7 @@ function App() {
       const [cartData, orderData, bookmarkData] = await Promise.all([
         apiRequest('/cart', { token }),
         apiRequest('/orders/student', { token }),
-        apiRequest('/auth/bookmarks', { token }),
+        apiRequest('/api/auth/bookmarks', { token }),
       ]);
 
       setCartItems(cartData);
@@ -287,7 +287,7 @@ function App() {
     setLoading(true);
 
     try {
-      const endpoint = mode === 'login' ? '/auth/login' : '/auth/register';
+      const endpoint = mode === 'login' ? '/api/auth/login' : '/api/auth/register';
       const payload =
         mode === 'login'
           ? { email: formData.email, password: formData.password }
@@ -340,7 +340,7 @@ function App() {
     setLoading(true);
 
     try {
-      const data = await apiRequest('/auth/verify-login-otp', {
+      const data = await apiRequest('/api/auth/verify-login-otp', {
         method: 'POST',
         body: {
           email: loginOtpSession.email,
@@ -375,7 +375,7 @@ function App() {
     setLoading(true);
 
     try {
-      await apiRequest('/auth/resend-login-otp', {
+      await apiRequest('/api/auth/resend-login-otp', {
         method: 'POST',
         body: {
           email: loginOtpSession.email,
@@ -751,7 +751,7 @@ function App() {
 
     try {
       const updatedBookmarks = await apiRequest(
-        isBookmarked ? `/auth/bookmarks/${vendorId}` : '/auth/bookmarks',
+        isBookmarked ? `/api/auth/bookmarks/${vendorId}` : '/api/auth/bookmarks',
         {
           method: isBookmarked ? 'DELETE' : 'POST',
           token,
@@ -801,7 +801,7 @@ function App() {
         payload.password = formData.password;
       }
 
-      const updatedUser = await apiRequest('/auth/me', {
+      const updatedUser = await apiRequest('/api/auth/me', {
         method: 'PUT',
         token,
         body: payload,
@@ -831,7 +831,7 @@ function App() {
     setLoading(true);
 
     try {
-      await apiRequest('/auth/me', {
+      await apiRequest('/api/auth/me', {
         method: 'DELETE',
         token,
       });
