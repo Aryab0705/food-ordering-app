@@ -462,7 +462,7 @@ function App() {
 );
 
       // Step 1: ask the backend to create a secure Razorpay order for the current cart total.
-      const checkoutData = await apiRequest('/create-order', {
+      const checkoutData = await apiRequest('/api/create-order', {
         method: 'POST',
         token,
         body: {
