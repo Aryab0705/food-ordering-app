@@ -1,6 +1,19 @@
-const API_URL =
+const rawApiUrl =
   (import.meta.env.VITE_API_URL || 'https://food-ordering-backend-g9ff.onrender.com')
     .replace(/\/$/, '');
+const API_URL = rawApiUrl.endsWith('/api') ? rawApiUrl : `${rawApiUrl}/api`;
+
+const normalizeEndpoint = (endpoint = '') => {
+  const trimmedEndpoint = String(endpoint).trim();
+
+  if (!trimmedEndpoint) {
+    return '';
+  }
+
+  return trimmedEndpoint
+    .replace(/^\/+/, '')
+    .replace(/^api\/+/, '');
+};
 const buildHeaders = (token, hasBody = false) => {
   const headers = {};
 
@@ -16,7 +29,9 @@ const buildHeaders = (token, hasBody = false) => {
 };
 
 export const apiRequest = async (endpoint, { method = 'GET', body, token } = {}) => {
-  const response = await fetch(`${API_URL}${endpoint}`, {
+  const normalizedEndpoint = normalizeEndpoint(endpoint);
+  const requestUrl = normalizedEndpoint ? `${API_URL}/${normalizedEndpoint}` : API_URL;
+  const response = await fetch(requestUrl, {
     method,
     headers: buildHeaders(token, Boolean(body)),
     body: body ? JSON.stringify(body) : undefined,
