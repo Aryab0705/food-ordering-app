@@ -462,7 +462,7 @@ function App() {
 );
 
       // Step 1: ask the backend to create a secure Razorpay order for the current cart total.
-      const checkoutData = await apiRequest('/api/create-order', {
+      const checkoutData = await apiRequest('/create-order', {
         method: 'POST',
         token,
         body: {
@@ -480,7 +480,7 @@ function App() {
       console.log('Razorpay payment response:', paymentResponse);
 
       // Step 2: once Razorpay returns success, verify the payment signature on the server.
-      const verificationResponse = await apiRequest('/api/verify-payment', {
+      const verificationResponse = await apiRequest('/verify-payment', {
         method: 'POST',
         token,
         body: paymentResponse,
@@ -488,7 +488,7 @@ function App() {
       console.log('Razorpay verify-payment response:', verificationResponse);
 
       // Step 3: save the actual food orders only after the payment is verified.
-      const createdOrders = await apiRequest('/api/save-order', {
+      const createdOrders = await apiRequest('/save-order', {
         method: 'POST',
         token,
         body: {

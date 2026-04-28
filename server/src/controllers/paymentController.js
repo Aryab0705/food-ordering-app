@@ -35,8 +35,41 @@ const normalizeCartItem = (cartItem) => {
 const buildCartItems = (cart) =>
   cart.map(normalizeCartItem);
 
-const calculateTotalAmount = (items) =>
-  items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+const normalizePaymentAttemptItem = (item) => {
+  const price = toValidNumber(item?.price);
+  const quantity = toValidNumber(item?.quantity);
+
+  if (!item?.food || !item?.name || !item?.vendor) {
+    throw new Error('Saved payment items are incomplete. Please contact support with your payment ID.');
+  }
+
+  if (!Number.isFinite(price) || !Number.isFinite(quantity) || quantity <= 0) {
+    throw new Error(
+      `Saved payment data is invalid for ${item?.name || 'an item'}. Please contact support with your payment ID.`,
+    );
+  }
+
+  return {
+    ...item,
+    price,
+    quantity,
+  };
+};
+
+const calculateTotalAmount = (items) => {
+  const totalAmount = items.reduce((sum, item) => {
+    const price = toValidNumber(item?.price);
+    const quantity = toValidNumber(item?.quantity);
+
+    if (!Number.isFinite(price) || !Number.isFinite(quantity) || quantity <= 0) {
+      return NaN;
+    }
+
+    return sum + price * quantity;
+  }, 0);
+
+  return Number.isFinite(totalAmount) ? totalAmount : NaN;
+};
 
 const createOrderGroups = (items) =>
   Object.values(
@@ -127,7 +160,8 @@ const createPlatformOrders = async ({
   paymentMethod = '',
 }) => {
   // Each vendor gets its own order so restaurant-side fulfillment stays isolated.
-  const orderGroups = createOrderGroups(items);
+  const normalizedItems = items.map(normalizePaymentAttemptItem);
+  const orderGroups = createOrderGroups(normalizedItems);
   const createdOrders = await Promise.all(
     orderGroups.map((groupedItems) =>
       Order.create({
