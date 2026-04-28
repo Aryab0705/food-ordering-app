@@ -1,5 +1,6 @@
-const API_URL = import.meta.env.VITE_API_URL || 'https://food-ordering-backend-g9ff.onrender.com';
-
+const API_URL =
+  (import.meta.env.VITE_API_URL || 'https://food-ordering-backend-g9ff.onrender.com')
+    .replace(/\/$/, '');
 const buildHeaders = (token, hasBody = false) => {
   const headers = {};
 
