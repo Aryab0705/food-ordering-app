@@ -14,6 +14,10 @@ app.get("/", (req, res) => {
   res.send("Backend root working");
 });
 
+app.get('/api/health', (req, res) => {
+  res.json({ message: 'API is running' });
+});
+
 app.use(
   cors({
     origin: [
@@ -24,10 +28,6 @@ app.use(
   })
 );
 app.use(express.json());
-
-app.get('/api/health', (req, res) => {
-  res.json({ message: 'API is running' });
-});
 
 app.get(['/test-key', '/api/test-key'], (req, res) => {
   const keyLoaded = hasRealValue(process.env.RAZORPAY_KEY_ID);
