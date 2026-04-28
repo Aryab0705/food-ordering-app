@@ -63,10 +63,33 @@ const getCartSnapshot = async (userId) => {
     return null;
   }
 
-  const validCartItems = user.cart.filter((item) => item.food && item.food.isAvailable);
+  const validCartItems = user.cart.filter((item) => {
+    if (!item.food || !item.food.isAvailable) {
+      return false;
+    }
+
+    try {
+      normalizeCartItem(item);
+      return true;
+    } catch {
+      return false;
+    }
+  });
 
   if (!validCartItems.length) {
+    if (user.cart.length) {
+      user.cart = [];
+      await user.save();
+    }
     return null;
+  }
+
+  if (validCartItems.length !== user.cart.length) {
+    user.cart = validCartItems.map((item) => ({
+      food: item.food._id,
+      quantity: Number(item.quantity),
+    }));
+    await user.save();
   }
 
   const items = buildCartItems(validCartItems);
