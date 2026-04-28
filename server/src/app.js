@@ -20,10 +20,7 @@ app.get('/api/health', (req, res) => {
 
 app.use(
   cors({
-    origin: [
-      'http://localhost:5173',
-      'https://food-ordering-app-iota-liart.vercel.app'
-    ],
+    origin: true,
     credentials: true,
   })
 );
