@@ -716,7 +716,7 @@ function App() {
 
   const handleRateVendor = async (orderId, vendorId, rating) => {
     try {
-      const data = await apiRequest('/vendor-reviews', {
+      const data = await apiRequest('/api/vendor-reviews', {
         method: 'POST',
         token,
         body: {
