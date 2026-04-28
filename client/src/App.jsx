@@ -454,9 +454,12 @@ function App() {
 
     try {
       const totalAmount = cartItems.reduce(
-        (sum, item) => sum + item.food.price * item.quantity,
-        0,
-      );
+  (sum, item) =>
+    sum +
+    (Number(item?.food?.price || 0) *
+      Number(item?.quantity || 1)),
+  0
+);
 
       // Step 1: ask the backend to create a secure Razorpay order for the current cart total.
       const checkoutData = await apiRequest('/api/create-order', {
