@@ -16,11 +16,6 @@ const buildTransporter = () => {
     host: SMTP_HOST,
     port: Number(SMTP_PORT),
     secure: String(process.env.SMTP_SECURE || 'false') === 'true',
-    family: 4,
-    connectionTimeout: 15000,
-    greetingTimeout: 15000,
-    socketTimeout: 20000,
-    dnsTimeout: 10000,
     auth: {
       user: SMTP_USER,
       pass: SMTP_PASS,
@@ -54,8 +49,6 @@ const sendOtpEmail = async ({ email, name, otp }) => {
     throw new Error(
       'Unable to send OTP right now. Please check your email setup and try again.',
     );
-  } finally {
-    transporter.close();
   }
 };
 
