@@ -2,6 +2,8 @@ const Order = require('../models/Order');
 const User = require('../models/User');
 const VendorReview = require('../models/VendorReview');
 const asyncHandler = require('../utils/asyncHandler');
+const { hasTwilioConfig, sendSMS } = require('../utils/sendSMS');
+
 const calculateTotalAmount = (items) => {
   return items.reduce(
     (sum, item) =>
@@ -49,6 +51,30 @@ const normalizeGroupedItems = (items, fallbackStatus = 'pending') =>
     status: getItemStatus(item, fallbackStatus),
   }));
 
+const preparedSmsMessage =
+  'Your order from Campus Canteen Hub is prepared and ready for pickup. Please collect your order from the vendor. Thank you!';
+
+const sendPreparedOrderSms = async (order) => {
+  if (!hasTwilioConfig() || order.preparedSmsSentAt) {
+    return;
+  }
+
+  const student = await User.findById(order.student).select('phone');
+
+  if (!student?.phone) {
+    return;
+  }
+
+  const sent = await sendSMS(student.phone, preparedSmsMessage);
+
+  if (!sent) {
+    return;
+  }
+
+  order.preparedSmsSentAt = new Date();
+  await order.save();
+};
+
 const splitLegacyOrder = async (order) => {
   const plainOrder = order.toObject ? order.toObject() : order;
   const vendorGroups = plainOrder.items.reduce((groups, item) => {
@@ -79,7 +105,9 @@ const splitLegacyOrder = async (order) => {
     const createdOrder = await Order.create({
       student: plainOrder.student,
       items,
-totalAmount: calculateTotalAmount(items),      status: deriveOrderStatus(items, plainOrder.status),
+      totalAmount: calculateTotalAmount(items),
+      status: deriveOrderStatus(items, plainOrder.status),
+      preparedSmsSentAt: plainOrder.preparedSmsSentAt || null,
     });
 
     await Order.findByIdAndUpdate(createdOrder._id, {
@@ -123,7 +151,8 @@ const sanitizeOrder = (order) => {
     ...plainOrder,
     items: visibleItems,
     status: deriveOrderStatus(visibleItems, plainOrder.status),
-totalAmount: calculateTotalAmount(visibleItems),  };
+    totalAmount: calculateTotalAmount(visibleItems),
+  };
 };
 
 const attachVendorRatings = async (orders, studentId) => {
@@ -267,8 +296,12 @@ const updateOrderStatus = asyncHandler(async (req, res) => {
   order.status = deriveOrderStatus(order.items, order.status);
   await order.save();
 
+  if (status === 'prepared') {
+    await sendPreparedOrderSms(order);
+  }
+
   const updatedOrder = await Order.findById(order._id)
-    .populate('student', 'name email')
+    .populate('student', 'name email phone')
     .populate('items.vendor', 'name shopName shopAddress');
 
   res.json(sanitizeOrder(updatedOrder));

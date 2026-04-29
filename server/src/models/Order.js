@@ -73,6 +73,10 @@ const orderSchema = new mongoose.Schema(
       default: '',
       trim: true,
     },
+    preparedSmsSentAt: {
+      type: Date,
+      default: null,
+    },
     status: {
       type: String,
       enum: ['pending', 'accepted', 'preparing', 'prepared', 'delivered', 'canceled', 'rejected'],
