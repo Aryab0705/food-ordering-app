@@ -13,18 +13,18 @@ const buildTransporter = () => {
     throw new Error('Email OTP is not configured. Add SMTP settings to the server environment.');
   }
 
-  return nodemailer.createTransport({
-    host: SMTP_HOST,
-    port: Number(SMTP_PORT),
-    secure: String(process.env.SMTP_SECURE || 'false') === 'true',
-    connectionTimeout: OTP_EMAIL_TIMEOUT_MS,
-    greetingTimeout: OTP_EMAIL_TIMEOUT_MS,
-    socketTimeout: OTP_EMAIL_TIMEOUT_MS,
-    auth: {
-      user: SMTP_USER,
-      pass: SMTP_PASS,
-    },
-  });
+ return nodemailer.createTransport({
+  host: "smtp.gmail.com",
+  port: 465,
+  secure: true,
+  connectionTimeout: 15000,
+  greetingTimeout: 15000,
+  socketTimeout: 15000,
+  auth: {
+    user: SMTP_USER,
+    pass: SMTP_PASS,
+  },
+});
 };
 
 const withTimeout = (promise, timeoutMessage) =>
