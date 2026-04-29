@@ -1,7 +1,12 @@
 const nodemailer = require('nodemailer');
 
 const buildTransporter = () => {
-  const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS } = process.env;
+  const SMTP_HOST = String(process.env.SMTP_HOST || '').trim();
+  const SMTP_PORT = String(process.env.SMTP_PORT || '').trim();
+  const SMTP_USER = String(process.env.SMTP_USER || '').trim();
+  const SMTP_PASS = String(process.env.SMTP_PASS || '')
+    .replace(/\s+/g, '')
+    .trim();
 
   if (!SMTP_HOST || !SMTP_PORT || !SMTP_USER || !SMTP_PASS) {
     throw new Error('Email OTP is not configured. Add SMTP settings to the server environment.');
