@@ -1,6 +1,5 @@
 const express = require('express');
 const cors = require('cors');
-const mongoose = require('mongoose');
 const { isRazorpayConfigured, hasRealValue } = require('./utils/razorpayClient');
 const authRoutes = require('./routes/authRoutes');
 const foodRoutes = require('./routes/foodRoutes');
@@ -8,80 +7,66 @@ const cartRoutes = require('./routes/cartRoutes');
 const orderRoutes = require('./routes/orderRoutes');
 const paymentRoutes = require('./routes/paymentRoutes');
 const vendorReviewRoutes = require('./routes/vendorReviewRoutes');
-const requestLogger = require('./middleware/requestLogger');
 const { errorHandler, notFound } = require('./middleware/errorMiddleware');
-const { getEmailConfig } = require('./utils/sendOtpEmail');
 
 const app = express();
+app.get("/", (req, res) => {
+  res.send("Backend root working");
+});
 
-const defaultAllowedOrigins = [
+app.get('/api/health', (req, res) => {
+  res.json({ message: 'API is running' });
+});
+
+// ── CORS ──────────────────────────────────────────────────────────────────────
+// Allowed origins:
+//   1. Local development
+//   2. Production Vercel deployment (canonical URL)
+//   3. Vercel preview/branch deployments — Vercel generates per-commit URLs
+//      like https://food-ordering-<hash>-<owner>-projects.vercel.app.
+//      We whitelist any *.vercel.app URL that belongs to the same project owner
+//      (aryab0705s-projects) so that preview deployments never hit CORS errors.
+//
+// Security: arbitrary vercel.app subdomains (e.g. attacker.vercel.app) are
+// NOT allowed — only URLs that match the project-owner suffix pattern.
+const ALLOWED_ORIGINS = [
   'http://localhost:5173',
-  'http://localhost:5174',
-  'http://127.0.0.1:5173',
-  'http://127.0.0.1:5174',
   'https://campus-canteen-hub.vercel.app',
 ];
 
-const configuredAllowedOrigins = [
-  process.env.CLIENT_URL,
-  ...(process.env.CLIENT_URLS || '').split(','),
-]
-  .map((origin) => String(origin || '').trim())
-  .filter(Boolean);
+// Matches any Vercel preview URL for this project owner.
+// Pattern: https://<anything>-aryab0705s-projects.vercel.app
+const VERCEL_PREVIEW_PATTERN = /^https:\/\/[\w-]+-aryab0705s-projects\.vercel\.app$/;
 
-const allowedOrigins = [...new Set([...defaultAllowedOrigins, ...configuredAllowedOrigins])];
+const corsOriginFn = (origin, callback) => {
+  // Non-browser requests (curl, server-to-server) send no Origin header.
+  // Allow them so health checks and internal calls keep working.
+  if (!origin) return callback(null, true);
 
-const isAllowedDevOrigin = (origin) => {
-  if (process.env.NODE_ENV === 'production') {
-    return false;
+  if (
+    ALLOWED_ORIGINS.includes(origin) ||
+    VERCEL_PREVIEW_PATTERN.test(origin)
+  ) {
+    return callback(null, true);
   }
 
-  return /^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin);
+  console.warn('[CORS] Blocked origin:', origin);
+  return callback(new Error(`CORS: origin "${origin}" is not allowed`));
 };
 
 app.use(
   cors({
-    origin(origin, callback) {
-      if (!origin || allowedOrigins.includes(origin) || isAllowedDevOrigin(origin)) {
-        callback(null, true);
-        return;
-      }
-
-      callback(new Error(`CORS blocked origin: ${origin}`));
-    },
+    origin: corsOriginFn,
     credentials: true,
+    // Explicitly list allowed methods so preflight OPTIONS succeeds
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
   })
 );
-app.use(express.json({ limit: '1mb' }));
-app.use(requestLogger);
 
-app.get('/', (req, res) => {
-  res.json({ message: 'Backend root working' });
-});
-
-app.get('/api/health', (req, res) => {
-  const emailConfig = getEmailConfig();
-
-  res.json({
-    status: 'ok',
-    message: 'API is running',
-    uptimeSeconds: Math.round(process.uptime()),
-    database: {
-      state: mongoose.connection.readyState,
-      connected: mongoose.connection.readyState === 1,
-      name: mongoose.connection.name || '',
-    },
-    env: {
-      jwtConfigured: Boolean(process.env.JWT_SECRET),
-      mongoConfigured: Boolean(process.env.MONGODB_URI),
-      emailConfigured: Boolean(emailConfig.user && emailConfig.pass),
-    },
-  });
-});
-
-app.get('/api', (req, res) => {
-  res.json({ status: 'ok', message: 'Campus Canteen Hub API is running' });
-});
+// Ensure preflight OPTIONS requests are handled before any auth middleware
+app.options('*', cors({ origin: corsOriginFn, credentials: true }));
+app.use(express.json());
 
 app.get(['/test-key', '/api/test-key'], (req, res) => {
   const keyLoaded = hasRealValue(process.env.RAZORPAY_KEY_ID);
