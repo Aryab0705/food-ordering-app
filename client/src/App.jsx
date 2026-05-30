@@ -302,7 +302,7 @@ function App() {
         setLoginOtpSession({
           email: data.email,
         });
-        setError('');
+        showMessage(data.message || 'OTP sent to your email address');
         return;
       }
 
@@ -375,13 +375,15 @@ function App() {
     setLoading(true);
 
     try {
-      await apiRequest('/api/auth/resend-login-otp', {
+      const data = await apiRequest('/api/auth/resend-login-otp', {
         method: 'POST',
         body: {
           email: loginOtpSession.email,
         },
       });
-      setError('');
+      showMessage(
+        data.message || 'A fresh OTP has been sent to your email',
+      );
     } catch (apiError) {
       showError(apiError.message);
     } finally {
@@ -983,6 +985,7 @@ function App() {
       </nav>
 
       {error ? <div className="flash-message error">{error}</div> : null}
+      {message ? <div className="flash-message success">{message}</div> : null}
 
       {!user ? (
         <>

@@ -7,7 +7,8 @@ const generateToken = require('../utils/generateToken');
 const asyncHandler = require('../utils/asyncHandler');
 const sendOtpEmail = require('../utils/sendOtpEmail');
 
-const OTP_EXPIRY_MINUTES = 10;
+const OTP_EXPIRY_MINUTES = 5;
+const MAX_LOGIN_OTP_ATTEMPTS = 5;
 
 const formatAuthResponse = (user) => ({
   _id: user._id,
@@ -31,13 +32,24 @@ const saveAndSendOtp = async (user) => {
 
   user.loginOtpHash = hashOtp(otp);
   user.loginOtpExpiresAt = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000);
+  user.loginOtpAttempts = 0;
   await user.save();
 
-  await sendOtpEmail({
-    email: user.email,
-    name: user.name,
-    otp,
-  });
+  try {
+    await sendOtpEmail({
+      email: user.email,
+      name: user.name,
+      otp,
+    });
+
+    return;
+  } catch (error) {
+    user.loginOtpHash = '';
+    user.loginOtpExpiresAt = null;
+    user.loginOtpAttempts = 0;
+    await user.save();
+    throw error;
+  }
 };
 
 const BOOKMARK_VENDOR_FIELDS = 'name shopName shopAddress averageRating reviewCount';
@@ -127,8 +139,15 @@ const registerUser = asyncHandler(async (req, res) => {
 
 const loginUser = asyncHandler(async (req, res) => {
   const { email, password } = req.body;
+  const normalizedEmail = String(email || '').trim().toLowerCase();
+  const startedAt = Date.now();
 
-  const user = await User.findOne({ email: email?.toLowerCase() });
+  if (!normalizedEmail || !password) {
+    res.status(400);
+    throw new Error('Email and password are required');
+  }
+
+  const user = await User.findOne({ email: normalizedEmail });
 
   if (!user || !(await user.matchPassword(password))) {
     res.status(401);
@@ -136,6 +155,8 @@ const loginUser = asyncHandler(async (req, res) => {
   }
 
   await saveAndSendOtp(user);
+
+  console.log(`[auth] Login OTP prepared for ${user.email} in ${Date.now() - startedAt}ms`);
 
   res.json({
     requiresOtp: true,
@@ -146,13 +167,15 @@ const loginUser = asyncHandler(async (req, res) => {
 
 const verifyLoginOtp = asyncHandler(async (req, res) => {
   const { email, otp } = req.body;
+  const normalizedEmail = String(email || '').trim().toLowerCase();
+  const normalizedOtp = String(otp || '').trim();
 
-  if (!email || !otp) {
+  if (!normalizedEmail || !normalizedOtp) {
     res.status(400);
     throw new Error('Email and OTP are required');
   }
 
-  const user = await User.findOne({ email: email.toLowerCase() });
+  const user = await User.findOne({ email: normalizedEmail });
 
   if (!user || !user.loginOtpHash || !user.loginOtpExpiresAt) {
     res.status(400);
@@ -162,19 +185,34 @@ const verifyLoginOtp = asyncHandler(async (req, res) => {
   if (user.loginOtpExpiresAt.getTime() < Date.now()) {
     user.loginOtpHash = '';
     user.loginOtpExpiresAt = null;
+    user.loginOtpAttempts = 0;
     await user.save();
 
     res.status(400);
     throw new Error('OTP has expired. Please request a new one');
   }
 
-  if (user.loginOtpHash !== hashOtp(otp)) {
+  if (user.loginOtpHash !== hashOtp(normalizedOtp)) {
+    user.loginOtpAttempts = (user.loginOtpAttempts || 0) + 1;
+
+    if (user.loginOtpAttempts >= MAX_LOGIN_OTP_ATTEMPTS) {
+      user.loginOtpHash = '';
+      user.loginOtpExpiresAt = null;
+      user.loginOtpAttempts = 0;
+      await user.save();
+
+      res.status(429);
+      throw new Error('Too many invalid OTP attempts. Please request a new OTP');
+    }
+
+    await user.save();
     res.status(400);
     throw new Error('Invalid OTP');
   }
 
   user.loginOtpHash = '';
   user.loginOtpExpiresAt = null;
+  user.loginOtpAttempts = 0;
   await user.save();
 
   res.json(formatAuthResponse(user));
@@ -182,13 +220,14 @@ const verifyLoginOtp = asyncHandler(async (req, res) => {
 
 const resendLoginOtp = asyncHandler(async (req, res) => {
   const { email } = req.body;
+  const normalizedEmail = String(email || '').trim().toLowerCase();
 
-  if (!email) {
+  if (!normalizedEmail) {
     res.status(400);
     throw new Error('Email is required');
   }
 
-  const user = await User.findOne({ email: email.toLowerCase() });
+  const user = await User.findOne({ email: normalizedEmail });
 
   if (!user) {
     res.status(404);
@@ -197,7 +236,9 @@ const resendLoginOtp = asyncHandler(async (req, res) => {
 
   await saveAndSendOtp(user);
 
-  res.json({ message: 'A fresh OTP has been sent to your email' });
+  res.json({
+    message: 'A fresh OTP has been sent to your email',
+  });
 });
 
 const getProfile = asyncHandler(async (req, res) => {
