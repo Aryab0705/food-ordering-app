@@ -10,13 +10,35 @@
  * Required env variables:
  *   RESEND_API_KEY  — from https://resend.com/api-keys
  *   RESEND_FROM     — verified sender address, e.g. "Campus Canteen Hub <noreply@yourdomain.com>"
- *                     If you haven't verified a domain yet you can use the Resend sandbox:
- *                     "onboarding@resend.dev"  (only delivers to your Resend account email)
+ *                     For production, use a sender on a domain verified in Resend.
+ *                     The resend.dev sandbox sender is not valid for real user OTPs.
  */
 
 'use strict';
 
 const { Resend } = require('resend');
+
+const RESEND_SANDBOX_DOMAIN = 'resend.dev';
+
+const extractEmailAddress = (sender) => {
+  const match = String(sender || '').match(/<([^<>]+)>/);
+  return (match ? match[1] : sender || '').trim();
+};
+
+const getRequiredEnv = (name) => {
+  const value = (process.env[name] || '').trim();
+
+  if (!value) {
+    throw new Error(`${name} is not set. Add it to your Render environment variables.`);
+  }
+
+  return value;
+};
+
+const getResendFrom = () => getRequiredEnv('RESEND_FROM');
+
+const isResendSandboxSender = (sender) =>
+  extractEmailAddress(sender).toLowerCase().endsWith(`@${RESEND_SANDBOX_DOMAIN}`);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // HTML email template
@@ -112,10 +134,8 @@ const buildHtml = (name, otp) => `
  * @throws {Error} if the API key is missing or Resend rejects the request
  */
 const sendOtpEmail = async ({ email, name, otp }) => {
-  const isProduction = process.env.NODE_ENV === 'production';
-
   const apiKey = (process.env.RESEND_API_KEY || '').trim();
-  const from   = (process.env.RESEND_FROM    || '').trim() || 'onboarding@resend.dev';
+  const from = getResendFrom();
 
   // ── Startup / per-call diagnostic log (no secret exposed) ─────────────────
   console.log('[Resend] sendOtpEmail called:', {
@@ -129,18 +149,13 @@ const sendOtpEmail = async ({ email, name, otp }) => {
   if (!apiKey) {
     const msg = 'RESEND_API_KEY is not set. Add it to your Render environment variables.';
     console.error('[Resend] ❌', msg);
-
-    if (!isProduction) {
-      // Dev fallback — print OTP to console so login still works locally
-      console.warn('\n╔══════════════════════════════════════════════╗');
-      console.warn('║  DEV MODE — Resend key missing, using console║');
-      console.warn(`║  OTP for ${email.padEnd(34)}║`);
-      console.warn(`║  Code: ${String(otp).padEnd(38)}║`);
-      console.warn('╚══════════════════════════════════════════════╝\n');
-      return;
-    }
-
     throw new Error('Unable to send OTP right now. Email service is not configured.');
+  }
+
+  if (isResendSandboxSender(from)) {
+    throw new Error(
+      `Unable to send OTP: sender address ${extractEmailAddress(from)} is not verified for this recipient. Set RESEND_FROM to an address on a verified Resend domain.`,
+    );
   }
 
   // ── Send via Resend HTTPS API ──────────────────────────────────────────────
@@ -162,7 +177,10 @@ const sendOtpEmail = async ({ email, name, otp }) => {
         message:    error.message,
         statusCode: error.statusCode,
       });
-      throw new Error(`Resend API error: ${error.message}`);
+      const resendError = new Error(error.message || 'Resend rejected the email request.');
+      resendError.name = error.name || 'ResendError';
+      resendError.statusCode = error.statusCode;
+      throw resendError;
     }
 
     // ✅ Success — log message ID, never log the OTP
@@ -176,32 +194,27 @@ const sendOtpEmail = async ({ email, name, otp }) => {
       statusCode: err.statusCode,
       stack:      err.stack,
     });
-
-    if (!isProduction) {
-      // Dev fallback
-      console.warn('\n╔══════════════════════════════════════════════╗');
-      console.warn('║  DEV MODE — Resend failed, using console     ║');
-      console.warn(`║  OTP for ${email.padEnd(34)}║`);
-      console.warn(`║  Code: ${String(otp).padEnd(38)}║`);
-      console.warn('╚══════════════════════════════════════════════╝\n');
-      return;
-    }
-
     // Classify errors for a clean user-facing message
     if (
+      err.statusCode === 422 ||
+      (err.message || '').toLowerCase().includes('resend.dev') ||
+      (err.message || '').toLowerCase().includes('verify a domain') ||
+      (err.message || '').toLowerCase().includes('only send testing emails') ||
+      (err.message || '').toLowerCase().includes('domain') ||
+      (err.message || '').toLowerCase().includes('sender')
+    ) {
+      throw new Error(
+        `Unable to send OTP: sender address ${extractEmailAddress(from)} is not verified for this recipient. Set RESEND_FROM to an address on a verified Resend domain.`,
+      );
+    }
+
+    if (
+      err.statusCode === 401 ||
       err.statusCode === 403 ||
       (err.message || '').toLowerCase().includes('api key') ||
       (err.message || '').toLowerCase().includes('unauthorized')
     ) {
       throw new Error('Unable to send OTP: email service authentication failed. Check RESEND_API_KEY.');
-    }
-
-    if (
-      err.statusCode === 422 ||
-      (err.message || '').toLowerCase().includes('domain') ||
-      (err.message || '').toLowerCase().includes('sender')
-    ) {
-      throw new Error('Unable to send OTP: sender address not verified. Check RESEND_FROM.');
     }
 
     throw new Error('Unable to send OTP right now. Please try again in a moment.');
@@ -221,14 +234,14 @@ const sendOtpEmail = async ({ email, name, otp }) => {
  */
 const verifyEmailConfig = async () => {
   const apiKey = (process.env.RESEND_API_KEY || '').trim();
-  const from   = (process.env.RESEND_FROM    || '').trim();
+  const from = getResendFrom();
 
   console.log('[Resend] ── Startup config audit ───────────────────────────');
   console.log({
     RESEND_API_KEY: apiKey
       ? `${apiKey.slice(0, 8)}… (${apiKey.length} chars)`
       : '⚠ MISSING',
-    RESEND_FROM:    from || '⚠ MISSING — will default to onboarding@resend.dev (sandbox only)',
+    RESEND_FROM:    from,
   });
   console.log('[Resend] ─────────────────────────────────────────────────────');
 
@@ -246,9 +259,15 @@ const verifyEmailConfig = async () => {
     return false;
   }
 
-  if (!from) {
+  if (isResendSandboxSender(from)) {
+    console.error('[Resend] RESEND_FROM uses resend.dev, which is for testing only.');
+    console.error('[Resend] To send OTPs to users, set RESEND_FROM to an address on a verified Resend domain.');
+    return false;
+  }
+
+  if (!process.env.RESEND_FROM) {
     console.warn('[Resend] ⚠  RESEND_FROM is not set.');
-    console.warn('[Resend]    Using sandbox sender: onboarding@resend.dev');
+    console.warn(`[Resend]    Using sandbox sender: ${from}`);
     console.warn('[Resend]    Sandbox emails only deliver to your Resend account email.');
     console.warn('[Resend]    To send to any address, verify a domain at https://resend.com/domains');
   }
@@ -259,3 +278,4 @@ const verifyEmailConfig = async () => {
 
 module.exports = sendOtpEmail;
 module.exports.verifyEmailConfig = verifyEmailConfig;
+
