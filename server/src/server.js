@@ -2,7 +2,7 @@ require('dotenv').config();
 const app = require('./app');
 const connectDatabase = require('./config/db');
 const { isRazorpayConfigured, hasRealValue } = require('./utils/razorpayClient');
-const { getEmailConfig, verifyOtpEmailTransport } = require('./utils/sendOtpEmail');
+const { verifyEmailConfig } = require('./utils/sendOtpEmail');
 
 const PORT = process.env.PORT || 5000;
 
@@ -18,17 +18,10 @@ const validateEnvironment = () => {
 const startServer = async () => {
   validateEnvironment();
   await connectDatabase();
-  const emailConfig = getEmailConfig();
-
-  if (emailConfig.user && emailConfig.pass) {
-    try {
-      await verifyOtpEmailTransport();
-      console.log('OTP Gmail SMTP connection verified');
-    } catch (error) {
-      console.error(`OTP Gmail SMTP verification failed: ${error.message}`);
-    }
-  } else {
-    console.warn('OTP Gmail SMTP is not configured. Login OTP emails will fail until EMAIL_USER and EMAIL_PASS are set.');
+  try {
+    await verifyEmailConfig();
+  } catch (error) {
+    console.error(`OTP email configuration check failed: ${error.message}`);
   }
 
   app.listen(PORT, () => {

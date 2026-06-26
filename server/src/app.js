@@ -64,8 +64,8 @@ app.use(
   })
 );
 
-// Ensure preflight OPTIONS requests are handled before any auth middleware
-app.options('*', cors({ origin: corsOriginFn, credentials: true }));
+// Express 5 no longer accepts "*" here, so use a regex to catch all preflight requests.
+app.options(/.*/, cors({ origin: corsOriginFn, credentials: true }));
 app.use(express.json());
 
 app.get(['/test-key', '/api/test-key'], (req, res) => {
