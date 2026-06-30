@@ -5,6 +5,7 @@
  * Required env variables:
  *   SMTP_HOST     — Gmail SMTP host (e.g., smtp.gmail.com)
  *   SMTP_PORT     — SMTP port (e.g., 587 for TLS, 465 for SSL)
+ *   SMTP_SECURE   — SSL/TLS connection (true for 465, false for 587) - optional
  *   SMTP_USER     — Gmail address
  *   SMTP_PASS     — Gmail app password (not your regular password)
  *   SMTP_FROM     — Sender address (e.g., "Campus Canteen Hub <your@gmail.com>")
@@ -26,10 +27,15 @@ const getRequiredEnv = (name) => {
 
 // Create reusable transporter object
 const createTransporter = () => {
+  const port = parseInt(getRequiredEnv('SMTP_PORT'), 10);
+  const secure = process.env.SMTP_SECURE !== undefined
+    ? process.env.SMTP_SECURE === 'true'
+    : port === 465;
+
   return nodemailer.createTransport({
     host: getRequiredEnv('SMTP_HOST'),
-    port: parseInt(getRequiredEnv('SMTP_PORT'), 10),
-    secure: parseInt(getRequiredEnv('SMTP_PORT'), 10) === 465, // true for 465, false for other ports
+    port,
+    secure,
     auth: {
       user: getRequiredEnv('SMTP_USER'),
       pass: getRequiredEnv('SMTP_PASS'),
