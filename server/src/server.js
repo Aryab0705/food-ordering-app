@@ -18,12 +18,8 @@ const validateEnvironment = () => {
 const startServer = async () => {
   validateEnvironment();
   await connectDatabase();
-  try {
-    await verifyEmailConfig();
-  } catch (error) {
-    console.error(`OTP email configuration check failed: ${error.message}`);
-  }
 
+  // Start server immediately, validate email config in background
   app.listen(PORT, () => {
     console.log(
       hasRealValue(process.env.RAZORPAY_KEY_ID)
@@ -41,6 +37,11 @@ const startServer = async () => {
         : 'Razorpay payment integration is not ready',
     );
     console.log(`Server running on port ${PORT}`);
+  });
+
+  // Validate email config in background (non-blocking)
+  verifyEmailConfig().catch((error) => {
+    console.error(`OTP email configuration check failed: ${error.message}`);
   });
 };
 

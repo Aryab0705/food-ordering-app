@@ -34,6 +34,9 @@ const createTransporter = () => {
       user: getRequiredEnv('SMTP_USER'),
       pass: getRequiredEnv('SMTP_PASS'),
     },
+    connectionTimeout: 10000, // 10 seconds
+    greetingTimeout: 5000,   // 5 seconds
+    socketTimeout: 10000,   // 10 seconds
   });
 };
 
