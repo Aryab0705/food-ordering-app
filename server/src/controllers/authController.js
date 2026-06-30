@@ -35,21 +35,15 @@ const saveAndSendOtp = async (user) => {
   user.loginOtpAttempts = 0;
   await user.save();
 
-  try {
-    await sendOtpEmail({
-      email: user.email,
-      name: user.name,
-      otp,
-    });
-
-    return;
-  } catch (error) {
-    user.loginOtpHash = '';
-    user.loginOtpExpiresAt = null;
-    user.loginOtpAttempts = 0;
-    await user.save();
-    throw error;
-  }
+  // Send email in background (fire-and-forget) to prevent blocking login response
+  sendOtpEmail({
+    email: user.email,
+    name: user.name,
+    otp,
+  }).catch((error) => {
+    console.error('[auth] Failed to send OTP email:', error.message);
+    // Note: We don't clear the OTP on email failure since the user can request a new one
+  });
 };
 
 const BOOKMARK_VENDOR_FIELDS = 'name shopName shopAddress averageRating reviewCount';
