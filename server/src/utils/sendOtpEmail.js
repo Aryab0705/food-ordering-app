@@ -1,19 +1,30 @@
 /**
  * sendOtpEmail.js
- * Production OTP delivery via Gmail SMTP (Nodemailer).
+ * Production OTP delivery via Resend (HTTPS API — works on all cloud hosts).
+ *
+ * Why Resend instead of Gmail SMTP?
+ *   Cloud free-tier hosts (Render, Railway, Fly.io) commonly block outbound
+ *   ports 465 and 587, so direct SMTP connections time out at the TCP level.
+ *   Resend sends email over HTTPS (port 443), which is never firewalled.
+ *   Also avoids IPv6 connection issues that plague Gmail SMTP on Render.
  *
  * Required env variables:
- *   SMTP_HOST     — Gmail SMTP host (e.g., smtp.gmail.com)
- *   SMTP_PORT     — SMTP port (e.g., 587 for TLS, 465 for SSL)
- *   SMTP_SECURE   — SSL/TLS connection (true for 465, false for 587) - optional
- *   SMTP_USER     — Gmail address
- *   SMTP_PASS     — Gmail app password (not your regular password)
- *   SMTP_FROM     — Sender address (e.g., "Campus Canteen Hub <your@gmail.com>")
+ *   RESEND_API_KEY  — from https://resend.com/api-keys
+ *   RESEND_FROM     — verified sender address, e.g. "Campus Canteen Hub <noreply@yourdomain.com>"
+ *                     For production, use a sender on a domain verified in Resend.
+ *                     The resend.dev sandbox sender is not valid for real user OTPs.
  */
 
 'use strict';
 
-const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
+
+const RESEND_SANDBOX_DOMAIN = 'resend.dev';
+
+const extractEmailAddress = (sender) => {
+  const match = String(sender || '').match(/<([^<>]+)>/);
+  return (match ? match[1] : sender || '').trim();
+};
 
 const getRequiredEnv = (name) => {
   const value = (process.env[name] || '').trim();
@@ -25,26 +36,10 @@ const getRequiredEnv = (name) => {
   return value;
 };
 
-// Create reusable transporter object
-const createTransporter = () => {
-  const port = parseInt(getRequiredEnv('SMTP_PORT'), 10);
-  const secure = process.env.SMTP_SECURE !== undefined
-    ? process.env.SMTP_SECURE === 'true'
-    : port === 465;
+const getResendFrom = () => getRequiredEnv('RESEND_FROM');
 
-  return nodemailer.createTransport({
-    host: getRequiredEnv('SMTP_HOST'),
-    port,
-    secure,
-    auth: {
-      user: getRequiredEnv('SMTP_USER'),
-      pass: getRequiredEnv('SMTP_PASS'),
-    },
-    connectionTimeout: 10000, // 10 seconds
-    greetingTimeout: 5000,   // 5 seconds
-    socketTimeout: 10000,   // 10 seconds
-  });
-};
+const isResendSandboxSender = (sender) =>
+  extractEmailAddress(sender).toLowerCase().endsWith(`@${RESEND_SANDBOX_DOMAIN}`);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // HTML email template
@@ -134,50 +129,93 @@ const buildHtml = (name, otp) => `
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Sends a login OTP to the user's email address via Gmail SMTP.
+ * Sends a login OTP to the user's email address via the Resend HTTP API.
  *
  * @param {{ email: string, name: string, otp: string }} params
- * @throws {Error} if SMTP configuration is missing or sending fails
+ * @throws {Error} if the API key is missing or Resend rejects the request
  */
 const sendOtpEmail = async ({ email, name, otp }) => {
-  const from = getRequiredEnv('SMTP_FROM');
+  const apiKey = (process.env.RESEND_API_KEY || '').trim();
+  const from = getResendFrom();
 
   // ── Startup / per-call diagnostic log (no secret exposed) ─────────────────
-  console.log('[SMTP] sendOtpEmail called:', {
+  console.log('[Resend] sendOtpEmail called:', {
+    apiKeyExists: !!apiKey,
+    apiKeyPrefix: apiKey ? apiKey.slice(0, 8) + '…' : 'MISSING',
     from,
     to: email,
   });
 
-  // ── Send via SMTP ───────────────────────────────────────────────────────────
-  const transporter = createTransporter();
+  // ── Missing API key ────────────────────────────────────────────────────────
+  if (!apiKey) {
+    const msg = 'RESEND_API_KEY is not set. Add it to your Render environment variables.';
+    console.error('[Resend] ❌', msg);
+    throw new Error('Unable to send OTP right now. Email service is not configured.');
+  }
+
+  if (isResendSandboxSender(from)) {
+    throw new Error(
+      `Unable to send OTP: sender address ${extractEmailAddress(from)} is not verified for this recipient. Set RESEND_FROM to an address on a verified Resend domain.`,
+    );
+  }
+
+  // ── Send via Resend HTTPS API ──────────────────────────────────────────────
+  const resend = new Resend(apiKey);
 
   try {
-    const info = await transporter.sendMail({
+    const { data, error } = await resend.emails.send({
       from,
-      to: email,
+      to:      [email],
       subject: 'Your Campus Canteen Hub login OTP',
-      text: `Hello ${name}, your Campus Canteen Hub login OTP is: ${otp}\n\nThis code expires in 10 minutes. Do not share it with anyone.`,
-      html: buildHtml(name, otp),
+      text:    `Hello ${name}, your Campus Canteen Hub login OTP is: ${otp}\n\nThis code expires in 10 minutes. Do not share it with anyone.`,
+      html:    buildHtml(name, otp),
     });
 
-    // ✅ Success — log message ID, never log the OTP
-    console.log(`[SMTP] ✅ Email sent to ${email} — id: ${info.messageId}`);
-
-  } catch (err) {
-    // ── Full error dump for logs ──────────────────────────────────────────────
-    console.error('[SMTP] SEND FAILED — full error:', {
-      message: err.message,
-      code: err.code,
-      stack: err.stack,
-    });
-
-    // Classify errors for a clean user-facing message
-    if (err.code === 'EAUTH' || err.code === 'EAUTHENTICATIONFAILED') {
-      throw new Error('Unable to send OTP: email service authentication failed. Check SMTP_USER and SMTP_PASS.');
+    if (error) {
+      // Resend returned an API-level error (bad key, unverified domain, etc.)
+      console.error('[Resend] ❌ API error:', {
+        name:       error.name,
+        message:    error.message,
+        statusCode: error.statusCode,
+      });
+      const resendError = new Error(error.message || 'Resend rejected the email request.');
+      resendError.name = error.name || 'ResendError';
+      resendError.statusCode = error.statusCode;
+      throw resendError;
     }
 
-    if (err.code === 'ECONNECTION' || err.code === 'ETIMEDOUT') {
-      throw new Error('Unable to send OTP: could not connect to email server. Check SMTP_HOST and SMTP_PORT.');
+    // ✅ Success — log message ID, never log the OTP
+    console.log(`[Resend] ✅ Email sent to ${email} — id: ${data.id}`);
+
+  } catch (err) {
+    // ── Full error dump for Render logs ──────────────────────────────────────
+    console.error('[Resend] SEND FAILED — full error:', {
+      message:    err.message,
+      name:       err.name,
+      statusCode: err.statusCode,
+      stack:      err.stack,
+    });
+    // Classify errors for a clean user-facing message
+    if (
+      err.statusCode === 422 ||
+      (err.message || '').toLowerCase().includes('resend.dev') ||
+      (err.message || '').toLowerCase().includes('verify a domain') ||
+      (err.message || '').toLowerCase().includes('only send testing emails') ||
+      (err.message || '').toLowerCase().includes('domain') ||
+      (err.message || '').toLowerCase().includes('sender')
+    ) {
+      throw new Error(
+        `Unable to send OTP: sender address ${extractEmailAddress(from)} is not verified for this recipient. Set RESEND_FROM to an address on a verified Resend domain.`,
+      );
+    }
+
+    if (
+      err.statusCode === 401 ||
+      err.statusCode === 403 ||
+      (err.message || '').toLowerCase().includes('api key') ||
+      (err.message || '').toLowerCase().includes('unauthorized')
+    ) {
+      throw new Error('Unable to send OTP: email service authentication failed. Check RESEND_API_KEY.');
     }
 
     throw new Error('Unable to send OTP right now. Please try again in a moment.');
@@ -189,37 +227,53 @@ const sendOtpEmail = async ({ email, name, otp }) => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Validates SMTP configuration at server startup.
- * Does NOT make a live network call — just confirms env vars are present.
+ * Validates Resend configuration at server startup.
+ * Does NOT make a live network call — just confirms env vars are present
+ * and the API key has the expected format.
  *
  * @returns {Promise<boolean>}
  */
 const verifyEmailConfig = async () => {
-  console.log('[SMTP] ── Startup config audit ───────────────────────────');
+  const apiKey = (process.env.RESEND_API_KEY || '').trim();
+  const from = getResendFrom();
+
+  console.log('[Resend] ── Startup config audit ───────────────────────────');
   console.log({
-    SMTP_HOST: process.env.SMTP_HOST || '⚠ MISSING',
-    SMTP_PORT: process.env.SMTP_PORT || '⚠ MISSING',
-    SMTP_USER: process.env.SMTP_USER || '⚠ MISSING',
-    SMTP_PASS: process.env.SMTP_PASS ? '*** (set)' : '⚠ MISSING',
-    SMTP_FROM: process.env.SMTP_FROM || '⚠ MISSING',
+    RESEND_API_KEY: apiKey
+      ? `${apiKey.slice(0, 8)}… (${apiKey.length} chars)`
+      : '⚠ MISSING',
+    RESEND_FROM:    from,
   });
-  console.log('[SMTP] ─────────────────────────────────────────────────────');
+  console.log('[Resend] ─────────────────────────────────────────────────────');
 
-  const required = ['SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASS', 'SMTP_FROM'];
-  const missing = required.filter(key => !process.env[key]);
-
-  if (missing.length > 0) {
-    console.error('[SMTP] ❌ Missing required environment variables:', missing.join(', '));
-    console.error('[SMTP]    Add these to your environment variables.');
+  if (!apiKey) {
+    console.error('[Resend] ❌ RESEND_API_KEY is not set.');
+    console.error('[Resend]    1. Create a free account at https://resend.com');
+    console.error('[Resend]    2. Generate an API key at https://resend.com/api-keys');
+    console.error('[Resend]    3. Add RESEND_API_KEY to your Render environment variables.');
     return false;
   }
 
-  const port = parseInt(process.env.SMTP_PORT, 10);
-  if (port !== 587 && port !== 465) {
-    console.warn('[SMTP] ⚠  SMTP_PORT should be 587 (TLS) or 465 (SSL).');
+  if (!apiKey.startsWith('re_')) {
+    console.error('[Resend] ❌ RESEND_API_KEY does not start with "re_" — it may be invalid.');
+    console.error('[Resend]    Verify the key at https://resend.com/api-keys');
+    return false;
   }
 
-  console.log('[SMTP] ✅ Configuration looks valid — OTP emails should work.');
+  if (isResendSandboxSender(from)) {
+    console.error('[Resend] RESEND_FROM uses resend.dev, which is for testing only.');
+    console.error('[Resend] To send OTPs to users, set RESEND_FROM to an address on a verified Resend domain.');
+    return false;
+  }
+
+  if (!process.env.RESEND_FROM) {
+    console.warn('[Resend] ⚠  RESEND_FROM is not set.');
+    console.warn(`[Resend]    Using sandbox sender: ${from}`);
+    console.warn('[Resend]    Sandbox emails only deliver to your Resend account email.');
+    console.warn('[Resend]    To send to any address, verify a domain at https://resend.com/domains');
+  }
+
+  console.log('[Resend] ✅ Configuration looks valid — OTP emails should work.');
   return true;
 };
 
