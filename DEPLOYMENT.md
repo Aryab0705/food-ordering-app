@@ -13,13 +13,17 @@ JWT_SECRET=your_strong_secret_key
 PORT=5000
 ```
 
-#### Email (Resend) - Required for OTP
+#### Email (Gmail SMTP) - Required for OTP
 ```
-RESEND_API_KEY=re_xxxxxxxxxxxxxxxxxxxxxxxxxxxx
-RESEND_FROM=Campus Canteen Hub <noreply@yourdomain.com>
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_SECURE=false
+SMTP_USER=your@gmail.com
+SMTP_PASS=your_gmail_app_password
+SMTP_FROM=Campus Canteen Hub <your@gmail.com>
 ```
 
-**Important:** `RESEND_FROM` must use a domain verified in Resend. The resend.dev sandbox sender only sends to your Resend account email. To send OTPs to any user, verify a domain at https://resend.com/domains.
+**Note:** Generate Gmail App Password at https://myaccount.google.com/apppasswords (requires 2FA)
 
 #### Payment (Razorpay)
 ```
@@ -40,13 +44,9 @@ TWILIO_PHONE_NUMBER=your_twilio_phone_number
 ```
 
 ### Removed Variables
-The following are no longer needed (Gmail SMTP has IPv6 issues on Render):
-- `SMTP_HOST` (remove if present)
-- `SMTP_PORT` (remove if present)
-- `SMTP_SECURE` (remove if present)
-- `SMTP_USER` (remove if present)
-- `SMTP_PASS` (remove if present)
-- `SMTP_FROM` (remove if present)
+The following are no longer needed (migrated back to Gmail SMTP):
+- `RESEND_API_KEY` (remove if present)
+- `RESEND_FROM` (remove if present)
 
 ## Frontend (Vercel)
 
@@ -63,9 +63,9 @@ VITE_API_URL=https://food-ordering-backend-g9ff.onrender.com/api
 ## Troubleshooting
 
 ### OTP Not Working on Deployed Site
-1. Check Render logs for Resend errors
-2. Verify `RESEND_API_KEY` and `RESEND_FROM` are set in Render
-3. Ensure `RESEND_FROM` uses a domain verified in Resend (not resend.dev)
+1. Check Render logs for SMTP errors
+2. Verify all SMTP_* variables are set in Render
+3. Ensure SMTP_PASS is a valid Gmail App Password
 4. Check email spam folder
 5. Verify Render backend URL is correct in frontend
 
@@ -77,16 +77,13 @@ VITE_API_URL=https://food-ordering-backend-g9ff.onrender.com/api
 ### Server Timeout
 - Email sending is non-blocking (fire-and-forget)
 - Login responds immediately
-- Email sends in background via Resend API
+- Email sends in background via SMTP
 
-### Why Resend Instead of Gmail SMTP?
-Gmail SMTP has known issues on cloud platforms like Render:
+### SMTP Connection Issues on Render
+Gmail SMTP may have connectivity issues on Render:
 - IPv6 connection failures (ENETUNREACH)
 - Port blocking (465/587) on free-tier firewalls
-- Slow connection timeouts
 
-Resend uses HTTPS (port 443) which:
-- Works on all cloud platforms
-- Never firewalled
-- No IPv6 issues
-- Faster and more reliable
+If SMTP fails consistently on Render, consider:
+- Using a transactional email service (SendGrid, Mailgun, Brevo)
+- Upgrading to a paid Render plan with better network access

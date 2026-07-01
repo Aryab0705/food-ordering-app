@@ -17,7 +17,6 @@
     "mongoose": "^8.19.1",
     "nodemailer": "^9.0.1",
     "razorpay": "^2.9.6",
-    "resend": "^6.12.4",
     "twilio": "^6.0.0"
   }
 }
