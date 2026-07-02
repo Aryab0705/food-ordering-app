@@ -15,6 +15,7 @@
 
 const nodemailer = require('nodemailer');
 const dns = require('dns');
+const net = require('net');
 
 // Force IPv4 DNS resolution to avoid IPv6 connection issues on Railway
 // Node.js v14+ supports setDefaultResultOrder
@@ -33,6 +34,54 @@ const customDnsLookup = (hostname, options, callback) => {
     }
     console.log('[SMTP] DNS resolved to IPv4:', address);
     callback(null, address, 4);
+  });
+};
+
+// Diagnostic: Test TCP connection to a host:port
+const testTcpConnection = (host, port, timeout = 5000) => {
+  return new Promise((resolve) => {
+    console.log(`[SMTP] Testing TCP connection to ${host}:${port}...`);
+    const socket = new net.Socket();
+    
+    socket.setTimeout(timeout);
+    
+    socket.on('connect', () => {
+      console.log(`[SMTP] ✅ TCP connection successful to ${host}:${port}`);
+      socket.destroy();
+      resolve({ success: true, host, port });
+    });
+    
+    socket.on('timeout', () => {
+      console.error(`[SMTP] ❌ TCP connection timeout to ${host}:${port}`);
+      socket.destroy();
+      resolve({ success: false, host, port, error: 'ETIMEDOUT' });
+    });
+    
+    socket.on('error', (err) => {
+      console.error(`[SMTP] ❌ TCP connection error to ${host}:${port}:`, err.message, err.code);
+      socket.destroy();
+      resolve({ success: false, host, port, error: err.code, message: err.message });
+    });
+    
+    socket.connect(port, host);
+  });
+};
+
+// Diagnostic: Verify DNS resolution
+const testDnsResolution = async (hostname) => {
+  console.log(`[SMTP] Testing DNS resolution for ${hostname}...`);
+  
+  return new Promise((resolve) => {
+    // Test IPv4
+    dns.lookup(hostname, { family: 4 }, (err, address) => {
+      if (err) {
+        console.error(`[SMTP] ❌ IPv4 DNS lookup failed for ${hostname}:`, err.message);
+        resolve({ ipv4: null, ipv4Error: err.message });
+      } else {
+        console.log(`[SMTP] ✅ IPv4 resolved: ${hostname} -> ${address}`);
+        resolve({ ipv4: address, ipv4Error: null });
+      }
+    });
   });
 };
 
@@ -174,18 +223,36 @@ const buildHtml = (name, otp) => `
  */
 const sendOtpEmail = async ({ email, name, otp }) => {
   const from = getRequiredEnv('SMTP_FROM');
-  const transporter = createTransporter();
+  const host = getRequiredEnv('SMTP_HOST');
+  const port = parseInt(getRequiredEnv('SMTP_PORT'), 10);
 
   // ── Debug logs ───────────────────────────────────────────────────────────────
   console.log('[SMTP] sendOtpEmail called:', {
-    host: getRequiredEnv('SMTP_HOST'),
-    port: getRequiredEnv('SMTP_PORT'),
+    host,
+    port,
     secure: process.env.SMTP_SECURE !== undefined
       ? process.env.SMTP_SECURE === 'true'
-      : parseInt(getRequiredEnv('SMTP_PORT'), 10) === 465,
+      : port === 465,
     from,
     to: email,
   });
+
+  // ── Run network diagnostics ─────────────────────────────────────────────────
+  console.log('[SMTP] ── Running network diagnostics ───────────────────────────');
+  
+  // Test DNS resolution
+  const dnsResult = await testDnsResolution(host);
+  console.log('[SMTP] DNS result:', dnsResult);
+  
+  // Test TCP connection to both ports
+  const tcp587 = await testTcpConnection(host, 587);
+  const tcp465 = await testTcpConnection(host, 465);
+  console.log('[SMTP] TCP test results:', { port587: tcp587, port465: tcp465 });
+  
+  console.log('[SMTP] ── Diagnostics complete ─────────────────────────────────');
+
+  // ── Create transporter ───────────────────────────────────────────────────────
+  const transporter = createTransporter();
 
   // ── Verify transporter connection before sending ───────────────────────────
   try {
