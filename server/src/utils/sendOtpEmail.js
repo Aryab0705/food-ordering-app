@@ -14,6 +14,27 @@
 'use strict';
 
 const nodemailer = require('nodemailer');
+const dns = require('dns');
+
+// Force IPv4 DNS resolution to avoid IPv6 connection issues on Railway
+// Node.js v14+ supports setDefaultResultOrder
+if (dns.setDefaultResultOrder) {
+  dns.setDefaultResultOrder('ipv4first');
+  console.log('[SMTP] DNS configured to prefer IPv4');
+}
+
+// Custom DNS lookup that forces IPv4 resolution
+const customDnsLookup = (hostname, options, callback) => {
+  console.log('[SMTP] DNS lookup for:', hostname, 'forcing IPv4');
+  dns.lookup(hostname, { family: 4 }, (err, address) => {
+    if (err) {
+      console.error('[SMTP] DNS lookup failed:', err);
+      return callback(err);
+    }
+    console.log('[SMTP] DNS resolved to IPv4:', address);
+    callback(null, address, 4);
+  });
+};
 
 const getRequiredEnv = (name) => {
   const value = (process.env[name] || '').trim();
@@ -51,6 +72,10 @@ const createTransporter = () => {
     connectionTimeout: 10000, // 10 seconds
     greetingTimeout: 5000,   // 5 seconds
     socketTimeout: 10000,   // 10 seconds
+    // Force IPv4 DNS resolution
+    dns: {
+      lookup: customDnsLookup,
+    },
   });
 };
 
