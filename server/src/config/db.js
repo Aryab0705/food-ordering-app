@@ -4,6 +4,7 @@ const dns = require('node:dns');
 let reconnectTimer = null;
 let reconnectInProgress = false;
 let connectionMonitoringInstalled = false;
+let cachedPromise = null;
 
 // Escape hatch for the Atlas "tlsv1 alert internal error" handshake failure.
 // Set MONGODB_TLS_INSECURE=true in .env only if that error comes back. Unlike
@@ -82,6 +83,16 @@ const logConnectionError = (error) => {
 };
 
 const connectDatabase = async ({ logFailure = true } = {}) => {
+  if (mongoose.connection.readyState === 1) {
+    return mongoose.connection;
+  }
+
+  if (cachedPromise && mongoose.connection.readyState === 2) {
+    return cachedPromise;
+  }
+
+  cachedPromise = null;
+
   const mongoUri = process.env.MONGODB_URI;
 
   if (!mongoUri) {
@@ -101,9 +112,12 @@ const connectDatabase = async ({ logFailure = true } = {}) => {
   }
 
   try {
-    await mongoose.connect(mongoUri, buildConnectOptions());
+    cachedPromise = mongoose.connect(mongoUri, buildConnectOptions());
+    await cachedPromise;
     console.log(`MongoDB connected to ${mongoose.connection.name}`);
+    return mongoose.connection;
   } catch (error) {
+    cachedPromise = null;
     if (logFailure) {
       logConnectionError(error);
     }
@@ -225,6 +239,7 @@ const installConnectionMonitoring = () => {
   });
 
   mongoose.connection.on('disconnected', () => {
+    cachedPromise = null;
     console.warn('[MongoDB] Connection lost. Reconnecting in the background...');
     scheduleReconnect();
   });
