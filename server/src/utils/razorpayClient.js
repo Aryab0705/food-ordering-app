@@ -2,6 +2,12 @@ const Razorpay = require('razorpay');
 
 let razorpayInstance;
 
+const getKeyMode = (keyId) => {
+  if (String(keyId || '').startsWith('rzp_live_')) return 'LIVE';
+  if (String(keyId || '').startsWith('rzp_test_')) return 'TEST';
+  return 'UNKNOWN';
+};
+
 const hasRealValue = (value) => {
   if (!value) {
     return false;
@@ -32,6 +38,10 @@ const getRazorpayClient = () => {
   }
 
   if (!razorpayInstance) {
+    console.log('[Razorpay] Key configured:', hasRealValue(process.env.RAZORPAY_KEY_ID));
+    console.log('[Razorpay] Secret configured:', hasRealValue(process.env.RAZORPAY_KEY_SECRET));
+    console.log('[Razorpay] Key mode:', getKeyMode(process.env.RAZORPAY_KEY_ID));
+
     razorpayInstance = new Razorpay({
       key_id: process.env.RAZORPAY_KEY_ID,
       key_secret: process.env.RAZORPAY_KEY_SECRET,
@@ -44,3 +54,4 @@ const getRazorpayClient = () => {
 module.exports = getRazorpayClient;
 module.exports.isRazorpayConfigured = isRazorpayConfigured;
 module.exports.hasRealValue = hasRealValue;
+module.exports.getKeyMode = getKeyMode;

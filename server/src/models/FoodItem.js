@@ -35,6 +35,11 @@ const foodItemSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+    estimatedPrepTime: {
+      type: Number,
+      default: 10,
+      min: 1,
+    },
     vendor: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
@@ -43,5 +48,7 @@ const foodItemSchema = new mongoose.Schema(
   },
   { timestamps: true },
 );
+
+foodItemSchema.index({ isAvailable: 1 });
 
 module.exports = mongoose.model('FoodItem', foodItemSchema);

@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const mongoose = require('mongoose');
 const { isRazorpayConfigured, hasRealValue } = require('./utils/razorpayClient');
 const authRoutes = require('./routes/authRoutes');
 const foodRoutes = require('./routes/foodRoutes');
@@ -7,16 +8,11 @@ const cartRoutes = require('./routes/cartRoutes');
 const orderRoutes = require('./routes/orderRoutes');
 const paymentRoutes = require('./routes/paymentRoutes');
 const vendorReviewRoutes = require('./routes/vendorReviewRoutes');
+const reviewRoutes = require('./routes/reviewRoutes');
+const recommendationRoutes = require('./routes/recommendationRoutes');
 const { errorHandler, notFound } = require('./middleware/errorMiddleware');
 
 const app = express();
-app.get("/", (req, res) => {
-  res.send("Backend root working");
-});
-
-app.get('/api/health', (req, res) => {
-  res.json({ message: 'API is running' });
-});
 
 // ── CORS ──────────────────────────────────────────────────────────────────────
 // Allowed origins:
@@ -31,7 +27,12 @@ app.get('/api/health', (req, res) => {
 // NOT allowed — only URLs that match the project-owner suffix pattern.
 const ALLOWED_ORIGINS = [
   'http://localhost:5173',
+  // Vite also answers on the loopback IP, which the browser treats as a
+  // different origin than localhost.
+  'http://127.0.0.1:5173',
   'https://campus-canteen-hub.vercel.app',
+  // Lets a deployment point at a different client without a code change.
+  ...(process.env.CLIENT_URL ? [process.env.CLIENT_URL] : []),
 ];
 
 // Matches any Vercel preview URL for this project owner.
@@ -51,7 +52,11 @@ const corsOriginFn = (origin, callback) => {
   }
 
   console.warn('[CORS] Blocked origin:', origin);
-  return callback(new Error(`CORS: origin "${origin}" is not allowed`));
+  // Tagged with a status so errorHandler answers 403 instead of a 500 that
+  // echoes the caller-supplied origin straight back in the response body.
+  const corsError = new Error('Origin not allowed by CORS policy');
+  corsError.status = 403;
+  return callback(corsError);
 };
 
 app.use(
@@ -68,6 +73,23 @@ app.use(
 app.options(/.*/, cors({ origin: corsOriginFn, credentials: true }));
 app.use(express.json());
 
+// Declared after the CORS middleware so these two responses also carry the
+// Access-Control-* headers. Previously they were registered above it, so
+// /api/health — the obvious CORS smoke test — failed misleadingly.
+app.get('/', (req, res) => {
+  res.send('Backend root working');
+});
+
+app.get('/api/health', (req, res) => {
+  const databaseConnected = mongoose.connection.readyState === 1;
+
+  res.json({
+    message: 'API is running',
+    databaseConnected,
+    database: databaseConnected ? mongoose.connection.name : null,
+  });
+});
+
 app.get(['/test-key', '/api/test-key'], (req, res) => {
   const keyLoaded = hasRealValue(process.env.RAZORPAY_KEY_ID);
   const secretLoaded = hasRealValue(process.env.RAZORPAY_KEY_SECRET);
@@ -82,12 +104,41 @@ app.get(['/test-key', '/api/test-key'], (req, res) => {
   });
 });
 
+// Everything below this line needs MongoDB. Answering 503 with a plain message
+// beats the driver's opaque "Client must be connected before running operations"
+// 500, and it keeps /api/health and /api/test-key usable while the DB is down.
+app.use(async (req, res, next) => {
+  if (mongoose.connection.readyState === 1) {
+    return next();
+  }
+
+  // If Mongoose is currently connecting (readyState === 2), give it up to 3s to complete
+  if (mongoose.connection.readyState === 2) {
+    for (let i = 0; i < 30; i += 1) {
+      await new Promise((resolve) => { setTimeout(resolve, 100); });
+      if (mongoose.connection.readyState === 1) {
+        return next();
+      }
+    }
+  }
+
+  res.status(503);
+  const unavailableError = new Error(
+    'Database unavailable. The API is running but has not connected to MongoDB yet'
+    + ' — check the server terminal for the connection error.',
+  );
+  unavailableError.status = 503;
+  return next(unavailableError);
+});
+
 app.use('/api/auth', authRoutes);
 app.use('/api/foods', foodRoutes);
 app.use('/api/cart', cartRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api', paymentRoutes);
 app.use('/api/vendor-reviews', vendorReviewRoutes);
+app.use('/api/reviews', reviewRoutes);
+app.use('/api/recommendations', recommendationRoutes);
 
 app.use(notFound);
 app.use(errorHandler);

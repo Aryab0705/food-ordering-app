@@ -7,6 +7,14 @@ const API_URL = rawApiUrl.endsWith('/api') ? rawApiUrl : `${rawApiUrl}/api`;
 const REQUEST_TIMEOUT_MS = Number(import.meta.env.VITE_API_TIMEOUT_MS || 45000);
 const DEBUG_API = import.meta.env.DEV || import.meta.env.VITE_DEBUG_API === 'true';
 
+// Registered once by App so an expired token can clear the session globally,
+// instead of every one of the ~29 call sites having to check for itself.
+let onUnauthorized = null;
+
+export const setUnauthorizedHandler = (handler) => {
+  onUnauthorized = handler;
+};
+
 const normalizeEndpoint = (endpoint = '') => {
   const trimmedEndpoint = String(endpoint).trim();
 
@@ -91,7 +99,19 @@ export const apiRequest = async (endpoint, { method = 'GET', body, token } = {})
     const errorMessage =
       data.message ||
       `Request failed with status ${response.status}`;
-    throw new Error(errorMessage);
+
+    // A 401 returned by the app's auth middleware means the session is no
+    // longer valid. A third-party service can also return 401 (for example
+    // Razorpay rejecting server keys), which must never sign the user out.
+    if (response.status === 401 && /^Not authorized/i.test(errorMessage) && onUnauthorized) {
+      onUnauthorized();
+    }
+
+    // Carry the status so callers can branch on it rather than string-matching
+    // the human-readable message.
+    const error = new Error(errorMessage);
+    error.status = response.status;
+    throw error;
   }
 
   return data;

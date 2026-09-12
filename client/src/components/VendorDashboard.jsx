@@ -255,12 +255,24 @@ function VendorDashboard({
       ) : null}
 
       {showOrders ? (
-        <section className="panel">
-          <div className="section-heading">
-            <span className="eyebrow">Orders</span>
-            <h2>Watch incoming orders in real time</h2>
-            <p>New days start fresh. Pick any date from the calendar to review past orders.</p>
-          </div>
+        <>
+          {orders.length > 0 ? (
+            <div className="day-revenue-card">
+              <div>
+                <span className="eyebrow">Daily Summary</span>
+                <h3>Whole Day Revenue</h3>
+                <p>Calculated for {selectedDateLabel} from accepted, prepared, and delivered orders.</p>
+              </div>
+              <strong>{formatCurrency(selectedDayRevenue)}</strong>
+            </div>
+          ) : null}
+
+          <section className="panel">
+            <div className="section-heading">
+              <span className="eyebrow">Orders</span>
+              <h2>Watch incoming orders in real time</h2>
+              <p>New days start fresh. Pick any date from the calendar to review past orders.</p>
+            </div>
 
           <div className="summary-grid">
             <div className="metric-card metric-card--premium">
@@ -396,24 +408,14 @@ function VendorDashboard({
             ))}
           </div>
 
-          {orders.length > 0 ? (
-            <div className="day-revenue-card">
-              <div>
-                <span className="eyebrow">Daily Summary</span>
-                <h3>Whole Day Revenue</h3>
-                <p>Calculated for {selectedDateLabel} from accepted, prepared, and delivered orders.</p>
+            {orders.length === 0 ? (
+              <div className="empty-state">
+                No orders were placed on {selectedDateLabel}. Pick another date from the calendar to
+                review past activity.
               </div>
-              <strong>{formatCurrency(selectedDayRevenue)}</strong>
-            </div>
-          ) : null}
-
-          {orders.length === 0 ? (
-            <div className="empty-state">
-              No orders were placed on {selectedDateLabel}. Pick another date from the calendar to
-              review past activity.
-            </div>
-          ) : null}
-        </section>
+            ) : null}
+          </section>
+        </>
       ) : null}
     </div>
   );

@@ -15,75 +15,15 @@
 
 const nodemailer = require('nodemailer');
 const dns = require('dns');
-const net = require('net');
 
-// Force IPv4 DNS resolution to avoid IPv6 connection issues on Railway
-// Node.js v14+ supports setDefaultResultOrder
+// Prefer IPv4 to avoid IPv6 egress problems on some hosts. This process-wide
+// setting is all nodemailer needs. The previous `customDnsLookup` helper was
+// handed to createTransport as a `dns` option, which nodemailer does not
+// recognise, so it never ran — it has been removed along with the per-request
+// TCP/DNS probes that added seconds of latency to every single login.
 if (dns.setDefaultResultOrder) {
   dns.setDefaultResultOrder('ipv4first');
-  console.log('[SMTP] DNS configured to prefer IPv4');
 }
-
-// Custom DNS lookup that forces IPv4 resolution
-const customDnsLookup = (hostname, options, callback) => {
-  console.log('[SMTP] DNS lookup for:', hostname, 'forcing IPv4');
-  dns.lookup(hostname, { family: 4 }, (err, address) => {
-    if (err) {
-      console.error('[SMTP] DNS lookup failed:', err);
-      return callback(err);
-    }
-    console.log('[SMTP] DNS resolved to IPv4:', address);
-    callback(null, address, 4);
-  });
-};
-
-// Diagnostic: Test TCP connection to a host:port
-const testTcpConnection = (host, port, timeout = 5000) => {
-  return new Promise((resolve) => {
-    console.log(`[SMTP] Testing TCP connection to ${host}:${port}...`);
-    const socket = new net.Socket();
-    
-    socket.setTimeout(timeout);
-    
-    socket.on('connect', () => {
-      console.log(`[SMTP] ✅ TCP connection successful to ${host}:${port}`);
-      socket.destroy();
-      resolve({ success: true, host, port });
-    });
-    
-    socket.on('timeout', () => {
-      console.error(`[SMTP] ❌ TCP connection timeout to ${host}:${port}`);
-      socket.destroy();
-      resolve({ success: false, host, port, error: 'ETIMEDOUT' });
-    });
-    
-    socket.on('error', (err) => {
-      console.error(`[SMTP] ❌ TCP connection error to ${host}:${port}:`, err.message, err.code);
-      socket.destroy();
-      resolve({ success: false, host, port, error: err.code, message: err.message });
-    });
-    
-    socket.connect(port, host);
-  });
-};
-
-// Diagnostic: Verify DNS resolution
-const testDnsResolution = async (hostname) => {
-  console.log(`[SMTP] Testing DNS resolution for ${hostname}...`);
-  
-  return new Promise((resolve) => {
-    // Test IPv4
-    dns.lookup(hostname, { family: 4 }, (err, address) => {
-      if (err) {
-        console.error(`[SMTP] ❌ IPv4 DNS lookup failed for ${hostname}:`, err.message);
-        resolve({ ipv4: null, ipv4Error: err.message });
-      } else {
-        console.log(`[SMTP] ✅ IPv4 resolved: ${hostname} -> ${address}`);
-        resolve({ ipv4: address, ipv4Error: null });
-      }
-    });
-  });
-};
 
 const getRequiredEnv = (name) => {
   const value = (process.env[name] || '').trim();
@@ -95,6 +35,37 @@ const getRequiredEnv = (name) => {
   return value;
 };
 
+// Google shows app passwords as four space-separated groups ("abcd efgh ijkl mnop")
+// and they get pasted verbatim. Those spaces travel into the AUTH PLAIN command and
+// Gmail replies "535-5.7.8 Username and Password not accepted", which reads like a
+// wrong password rather than a formatting problem. Strip whitespace only when what
+// remains is exactly the 16-character app-password shape, so a real passphrase that
+// legitimately contains spaces is left untouched.
+const readSmtpPassword = () => {
+  const raw = getRequiredEnv('SMTP_PASS');
+  const compact = raw.replace(/\s+/g, '');
+
+  if (raw !== compact && /^[a-z0-9]{16}$/i.test(compact)) {
+    console.log('[SMTP] Stripped spaces from SMTP_PASS (Gmail app-password format).');
+    return compact;
+  }
+
+  return raw;
+};
+
+// Gmail returns the same 535 for a revoked password, a password belonging to a
+// different account, and 2-Step Verification being off. Spell out the fix order.
+const logAuthFailureHelp = () => {
+  console.error('--- Gmail rejected the SMTP login. This is a credentials problem. Check, in order:');
+  console.error(`  1. The app password must belong to ${process.env.SMTP_USER || 'SMTP_USER'} itself,`);
+  console.error('     not to another Google account.');
+  console.error('  2. 2-Step Verification must be ON for that account, or app passwords do not exist.');
+  console.error('  3. App passwords are revoked when the account password changes. Generate a new one');
+  console.error('     at https://myaccount.google.com/apppasswords and paste the 16 characters.');
+  console.error('  4. A normal Gmail password will never work here — only an app password.');
+};
+
+
 // Create reusable transporter object
 const createTransporter = () => {
   const host = getRequiredEnv('SMTP_HOST');
@@ -103,28 +74,17 @@ const createTransporter = () => {
     ? process.env.SMTP_SECURE === 'true'
     : port === 465;
 
-  console.log('[SMTP] Transporter config:', {
-    host,
-    port,
-    secure,
-    user: getRequiredEnv('SMTP_USER'),
-  });
-
   return nodemailer.createTransport({
     host,
     port,
     secure,
     auth: {
       user: getRequiredEnv('SMTP_USER'),
-      pass: getRequiredEnv('SMTP_PASS'),
+      pass: readSmtpPassword(),
     },
     connectionTimeout: 10000, // 10 seconds
     greetingTimeout: 5000,   // 5 seconds
     socketTimeout: 10000,   // 10 seconds
-    // Force IPv4 DNS resolution
-    dns: {
-      lookup: customDnsLookup,
-    },
   });
 };
 
@@ -132,7 +92,7 @@ const createTransporter = () => {
 // HTML email template
 // ─────────────────────────────────────────────────────────────────────────────
 
-const buildHtml = (name, otp) => `
+const buildHtml = (name, otp, expiresInMinutes) => `
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -166,7 +126,7 @@ const buildHtml = (name, otp) => `
               </p>
               <p style="margin:0 0 28px;font-size:15px;color:#6b7280;line-height:1.6;">
                 Use the one-time passcode below to complete your login.
-                This code is valid for <strong>10 minutes</strong>.
+                This code is valid for <strong>${expiresInMinutes} minutes</strong>.
               </p>
 
               <!-- OTP box -->
@@ -218,84 +178,38 @@ const buildHtml = (name, otp) => `
 /**
  * Sends a login OTP to the user's email address via Gmail SMTP.
  *
- * @param {{ email: string, name: string, otp: string }} params
+ * @param {{ email: string, name: string, otp: string, expiresInMinutes?: number }} params
  * @throws {Error} if SMTP configuration is missing or sending fails
  */
-const sendOtpEmail = async ({ email, name, otp }) => {
+const sendOtpEmail = async ({ email, name, otp, expiresInMinutes = 5 }) => {
   const from = getRequiredEnv('SMTP_FROM');
-  const host = getRequiredEnv('SMTP_HOST');
-  const port = parseInt(getRequiredEnv('SMTP_PORT'), 10);
-
-  // ── Debug logs ───────────────────────────────────────────────────────────────
-  console.log('[SMTP] sendOtpEmail called:', {
-    host,
-    port,
-    secure: process.env.SMTP_SECURE !== undefined
-      ? process.env.SMTP_SECURE === 'true'
-      : port === 465,
-    from,
-    to: email,
-  });
-
-  // ── Run network diagnostics ─────────────────────────────────────────────────
-  console.log('[SMTP] ── Running network diagnostics ───────────────────────────');
-  
-  // Test DNS resolution
-  const dnsResult = await testDnsResolution(host);
-  console.log('[SMTP] DNS result:', dnsResult);
-  
-  // Test TCP connection to both ports
-  const tcp587 = await testTcpConnection(host, 587);
-  const tcp465 = await testTcpConnection(host, 465);
-  console.log('[SMTP] TCP test results:', { port587: tcp587, port465: tcp465 });
-  
-  console.log('[SMTP] ── Diagnostics complete ─────────────────────────────────');
-
-  // ── Create transporter ───────────────────────────────────────────────────────
   const transporter = createTransporter();
 
-  // ── Verify transporter connection before sending ───────────────────────────
-  try {
-    console.log('[SMTP] Verifying SMTP connection...');
-    await transporter.verify();
-    console.log('[SMTP] ✅ SMTP connection verified');
-  } catch (verifyError) {
-    console.error('[SMTP] ❌ SMTP verification failed:', {
-      message: verifyError.message,
-      code: verifyError.code,
-      command: verifyError.command,
-      response: verifyError.response,
-      stack: verifyError.stack,
-    });
-    throw new Error(`Unable to send OTP: SMTP connection verification failed - ${verifyError.message}`);
-  }
-
-  // ── Send email ──────────────────────────────────────────────────────────────
   try {
     const info = await transporter.sendMail({
       from,
       to: email,
       subject: 'Your Campus Canteen Hub login OTP',
-      text: `Hello ${name}, your Campus Canteen Hub login OTP is: ${otp}\n\nThis code expires in 10 minutes. Do not share it with anyone.`,
-      html: buildHtml(name, otp),
+      text: `Hello ${name}, your Campus Canteen Hub login OTP is: ${otp}\n\nThis code expires in ${expiresInMinutes} minutes. Do not share it with anyone.`,
+      html: buildHtml(name, otp, expiresInMinutes),
     });
 
     // ✅ Success — log message ID, never log the OTP
     console.log(`[SMTP] ✅ Email sent to ${email} — id: ${info.messageId}`);
 
   } catch (err) {
-    // ── Full error dump for debugging ─────────────────────────────────────────
-    console.error('[SMTP] ❌ SEND FAILED — full error:', {
+    // No stack dump here: the classified message below plus the checklist is what
+    // actually helps, and the raw nodemailer stack buried the useful line.
+    console.error('[SMTP] ❌ Send failed:', {
       message: err.message,
       code: err.code,
-      response: err.response,
       responseCode: err.responseCode,
       command: err.command,
-      stack: err.stack,
     });
 
     // Classify errors for a clean user-facing message
-    if (err.code === 'EAUTH' || err.code === 'EAUTHENTICATIONFAILED') {
+    if (err.code === 'EAUTH' || err.code === 'EAUTHENTICATIONFAILED' || err.responseCode === 535) {
+      logAuthFailureHelp();
       throw new Error('Unable to send OTP: email service authentication failed. Check SMTP_USER and SMTP_PASS.');
     }
 
@@ -328,29 +242,20 @@ const sendOtpEmail = async ({ email, name, otp }) => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Validates SMTP configuration at server startup.
- * Does NOT make a live network call — just confirms env vars are present.
+ * Validates SMTP configuration at server startup and confirms the credentials
+ * actually authenticate. Previously this only checked that the env vars existed,
+ * so a revoked Gmail app password stayed invisible until a real user tried to log
+ * in — the failure showed up as a silent missing email rather than a boot error.
  *
  * @returns {Promise<boolean>}
  */
 const verifyEmailConfig = async () => {
-  console.log('[SMTP] ── Startup config audit ───────────────────────────');
-  console.log({
-    SMTP_HOST: process.env.SMTP_HOST || '⚠ MISSING',
-    SMTP_PORT: process.env.SMTP_PORT || '⚠ MISSING',
-    SMTP_SECURE: process.env.SMTP_SECURE || '⚠ MISSING',
-    SMTP_USER: process.env.SMTP_USER || '⚠ MISSING',
-    SMTP_PASS: process.env.SMTP_PASS ? '*** (set)' : '⚠ MISSING',
-    SMTP_FROM: process.env.SMTP_FROM || '⚠ MISSING',
-  });
-  console.log('[SMTP] ─────────────────────────────────────────────────────');
-
   const required = ['SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASS', 'SMTP_FROM'];
-  const missing = required.filter(key => !process.env[key]);
+  const missing = required.filter((key) => !process.env[key]);
 
   if (missing.length > 0) {
     console.error('[SMTP] ❌ Missing required environment variables:', missing.join(', '));
-    console.error('[SMTP]    Add these to your environment variables.');
+    console.error('[SMTP]    OTP login will not work until these are set.');
     return false;
   }
 
@@ -359,8 +264,22 @@ const verifyEmailConfig = async () => {
     console.warn('[SMTP] ⚠  SMTP_PORT should be 587 (TLS) or 465 (SSL).');
   }
 
-  console.log('[SMTP] ✅ Configuration looks valid — OTP emails should work.');
-  return true;
+  try {
+    await createTransporter().verify();
+    console.log(`[SMTP] ✅ Authenticated as ${process.env.SMTP_USER} — OTP emails will send.`);
+    return true;
+  } catch (error) {
+    console.error('[SMTP] ❌ SMTP login failed:', error.message);
+
+    if (error.code === 'EAUTH' || error.responseCode === 535) {
+      logAuthFailureHelp();
+    }
+
+    console.error('[SMTP]    Until this is fixed, login will answer 502 rather than pretend');
+    console.error('[SMTP]    the OTP was sent. Set AUTH_DEBUG_OTP=true in .env to print the');
+    console.error('[SMTP]    OTP to this terminal and keep working locally.');
+    return false;
+  }
 };
 
 module.exports = sendOtpEmail;

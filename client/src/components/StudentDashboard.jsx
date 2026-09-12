@@ -17,6 +17,8 @@ function StudentDashboard({
   onClearSelectedVendor,
   showMenu = true,
   showOrders = true,
+  recommendations = [],
+  recommendationsLoading = false,
 }) {
   const [activeOrderMenu, setActiveOrderMenu] = useState('');
   const [editingOrderId, setEditingOrderId] = useState('');
@@ -91,10 +93,15 @@ function StudentDashboard({
         averageRating: item.vendor.averageRating || 0,
         reviewCount: item.vendor.reviewCount || 0,
         items: [],
+        bestseller: null,
       };
     }
 
     groups[vendorId].items.push(item);
+
+    if (!groups[vendorId].bestseller && item.isAvailable) {
+      groups[vendorId].bestseller = item;
+    }
     return groups;
   }, {});
 
@@ -180,6 +187,93 @@ function StudentDashboard({
           </div>
 
           {menuLoading ? <p>Loading menu...</p> : null}
+
+          {!selectedVendor && !normalizedSearch && (recommendationsLoading || recommendations.length > 0) ? (
+            <section className="recommendations-panel" aria-label="Personalized Recommendations">
+              <div className="recommendations-header">
+                <div className="recommendations-header__title">
+                  <span className="eyebrow">Recommended For You</span>
+                  <h3>Handpicked dishes based on your campus cravings</h3>
+                  <p>Personalized from your orders and popular campus favorites.</p>
+                </div>
+                {!recommendationsLoading && recommendations.length > 0 ? (
+                  <span className="pill">{recommendations.length} recommended</span>
+                ) : null}
+              </div>
+
+              {recommendationsLoading ? (
+                <div className="recommendation-grid">
+                  {[1, 2, 3, 4, 5].map((n) => (
+                    <div key={n} className="recommendation-skeleton-card" />
+                  ))}
+                </div>
+              ) : (
+                <div className="recommendation-grid">
+                  {recommendations.map((item) => {
+                    const vendorName = item.vendor?.shopName || item.vendor?.name || 'Campus Canteen';
+                    return (
+                      <article
+                        className={item.isAvailable ? 'food-card' : 'food-card food-card--unavailable'}
+                        key={`rec-${item._id}`}
+                      >
+                        {item.imageUrl ? (
+                          <img
+                            className="food-card__image"
+                            src={item.imageUrl}
+                            alt={item.name}
+                            loading="lazy"
+                            onError={(event) => {
+                              event.currentTarget.style.display = 'none';
+                            }}
+                          />
+                        ) : null}
+
+                        <div className="food-card__header">
+                          <div className="food-card__meta food-card__meta--start">
+                            <span
+                              className={`food-type-marker food-type-marker--${item.foodType || 'veg'}`}
+                            >
+                              <span className="food-type-marker__dot"></span>
+                            </span>
+                            <span className="pill">{item.category}</span>
+                          </div>
+                          <div className="food-card__meta">
+                            <span className="price-tag">{formatCurrency(item.price)}</span>
+                          </div>
+                        </div>
+
+                        {item.reason ? (
+                          <div className="recommendation-reason-tag">
+                            <span aria-hidden="true">✨</span>
+                            <span>{item.reason}</span>
+                          </div>
+                        ) : null}
+
+                        <h3>{item.name}</h3>
+                        <p>{item.description}</p>
+
+                        <div className="food-card__footer">
+                          <span>{vendorName}</span>
+                          <button
+                            className={
+                              recentlyAddedFoodId === item._id
+                                ? 'secondary-button add-cart-button add-cart-button--added'
+                                : 'secondary-button add-cart-button'
+                            }
+                            type="button"
+                            onClick={() => onAddToCart(item._id)}
+                            disabled={!item.isAvailable}
+                          >
+                            {recentlyAddedFoodId === item._id ? 'Added' : 'Add to Cart'}
+                          </button>
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+          ) : null}
 
           <div className="stack-list">
             {vendorMenus.map((vendorMenu) => (
@@ -439,6 +533,36 @@ function StudentDashboard({
                     ) : null}
                   </div>
                 </div>
+
+                {order.status === 'prepared' || order.queue?.isPrepared ? (
+                  <div className="order-queue-banner order-queue-banner--prepared" role="status">
+                    <div className="order-queue-banner__icon" aria-hidden="true">🔔</div>
+                    <div className="order-queue-banner__content">
+                      <strong>Order Prepared!</strong>
+                      <p>Ready for pickup at the counter.</p>
+                    </div>
+                  </div>
+                ) : order.queue && !order.queue.isPrepared ? (
+                  <div className="order-queue-banner" role="status">
+                    <div className="order-queue-grid">
+                      <div className="order-queue-stat">
+                        <span className="order-queue-stat__label">⏱ Queue Position</span>
+                        <strong className="order-queue-stat__val">#{order.queue.position}</strong>
+                      </div>
+                      <div className="order-queue-stat">
+                        <span className="order-queue-stat__label">👥 Orders Ahead</span>
+                        <strong className="order-queue-stat__val">{order.queue.ordersAhead}</strong>
+                      </div>
+                      <div className="order-queue-stat">
+                        <span className="order-queue-stat__label">⏳ Estimated Wait</span>
+                        <strong className="order-queue-stat__val">{order.queue.estimatedWaitText}</strong>
+                      </div>
+                    </div>
+                    {order.queue.statusText ? (
+                      <div className="order-queue-hint">{order.queue.statusText}</div>
+                    ) : null}
+                  </div>
+                ) : null}
 
                 <div className="stack-list compact">
                   {order.items.map((item, index) => (

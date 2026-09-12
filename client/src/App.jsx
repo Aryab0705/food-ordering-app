@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import './App.css';
-import { apiRequest } from './api/client';
+import { apiRequest, setUnauthorizedHandler } from './api/client';
 import AccountPage from './components/AccountPage';
 import AuthForm from './components/AuthForm';
 import StudentCart from './components/StudentCart';
@@ -9,6 +9,8 @@ import VendorDashboard from './components/VendorDashboard';
 import { useSessionStorage } from './hooks/useSessionStorage';
 
 const emptyUser = null;
+const RAZORPAY_CHECKOUT_URL = 'https://checkout.razorpay.com/v1/checkout.js';
+const RAZORPAY_LOAD_TIMEOUT_MS = 15000;
 const getTodayString = () => {
   const today = new Date();
   const year = today.getFullYear();
@@ -51,6 +53,8 @@ function App() {
   const [paymentFailed, setPaymentFailed] = useState(false);
   const [onlinePaymentAvailable, setOnlinePaymentAvailable] = useState(false);
   const [paymentConfigMessage, setPaymentConfigMessage] = useState('');
+  const [recommendations, setRecommendations] = useState([]);
+  const [recommendationsLoading, setRecommendationsLoading] = useState(false);
 
   const user = session.user;
   const token = session.token;
@@ -85,11 +89,56 @@ function App() {
         return;
       }
 
-      const script = document.createElement('script');
-      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+      const existingScript = document.querySelector(`script[src="${RAZORPAY_CHECKOUT_URL}"]`);
+      const script = existingScript || document.createElement('script');
+      let settled = false;
+
+      const finish = (callback, value) => {
+        if (settled) {
+          return;
+        }
+
+        settled = true;
+        window.clearTimeout(timeoutId);
+        callback(value);
+      };
+
+      const timeoutId = window.setTimeout(() => {
+        finish(
+          reject,
+          new Error(
+            'Razorpay checkout did not load. Check your internet connection and disable any ad blocker, privacy extension, or firewall that blocks checkout.razorpay.com.',
+          ),
+        );
+      }, RAZORPAY_LOAD_TIMEOUT_MS);
+
+      const handleLoad = () => {
+        if (window.Razorpay) {
+          finish(resolve, true);
+          return;
+        }
+
+        finish(reject, new Error('Razorpay checkout loaded incorrectly. Please refresh and try again.'));
+      };
+
+      const handleError = () => {
+        finish(
+          reject,
+          new Error(
+            'Razorpay checkout could not load. Check your internet connection and disable any ad blocker, privacy extension, or firewall that blocks checkout.razorpay.com.',
+          ),
+        );
+      };
+
+      script.addEventListener('load', handleLoad, { once: true });
+      script.addEventListener('error', handleError, { once: true });
+
+      if (existingScript) {
+        return;
+      }
+
+      script.src = RAZORPAY_CHECKOUT_URL;
       script.async = true;
-      script.onload = () => resolve(true);
-      script.onerror = () => reject(new Error('Failed to load Razorpay checkout'));
       document.body.appendChild(script);
     });
 
@@ -123,7 +172,11 @@ function App() {
 
       razorpay.on('payment.failed', (event) => {
         reject(
-          new Error(event.error?.description || 'Payment failed. Please retry the payment.'),
+          new Error(
+            event.error?.description
+              || event.error?.reason
+              || 'Razorpay could not complete the payment. Confirm that the selected payment method is enabled and try again.',
+          ),
         );
       });
 
@@ -166,6 +219,26 @@ function App() {
     } finally {
       setCartLoading(false);
       setOrderLoading(false);
+    }
+  };
+
+  const loadRecommendations = async () => {
+    if (!token || user?.role !== 'student') {
+      setRecommendations([]);
+      return;
+    }
+
+    setRecommendationsLoading(true);
+
+    try {
+      const response = await apiRequest('/api/recommendations', { token });
+      setRecommendations(Array.isArray(response?.recommendations) ? response.recommendations : []);
+    } catch (apiError) {
+      // Graceful degradation: never crash or show blocking error if recommendation service fails
+      console.warn('[Recommendations] Failed to fetch recommendations:', apiError.message);
+      setRecommendations([]);
+    } finally {
+      setRecommendationsLoading(false);
     }
   };
 
@@ -244,6 +317,7 @@ function App() {
       setOrders([]);
       setBookmarkedVendors([]);
       setVendorItems([]);
+      setRecommendations([]);
       setOnlinePaymentAvailable(false);
       setPaymentConfigMessage('');
       setStudentView('menu');
@@ -254,6 +328,7 @@ function App() {
 
     if (user.role === 'student') {
       loadStudentData();
+      loadRecommendations();
       loadPaymentConfig();
     }
 
@@ -396,6 +471,17 @@ function App() {
     setError('');
   };
 
+  // Tokens expire after 7 days. Without this the stale session stayed in
+  // sessionStorage, the nav kept rendering dashboards, and every action failed
+  // with a red "Not authorized" flash that the user could not clear.
+  useEffect(() => {
+    setUnauthorizedHandler(() => {
+      setSession({ user: emptyUser, token: '' });
+    });
+
+    return () => setUnauthorizedHandler(null);
+  }, [setSession]);
+
   const handleLogout = () => {
     setSession({ user: emptyUser, token: '' });
     loadMenu();
@@ -471,7 +557,9 @@ function App() {
           totalAmount,
         },
       });
-      console.log('Razorpay create-order response:', checkoutData);
+      if (import.meta.env.DEV) {
+        console.log('Razorpay create-order response:', checkoutData);
+      }
 
       if (!checkoutData?.success || !checkoutData?.orderId) {
         throw new Error('Backend did not return a valid Razorpay order response.');
@@ -479,7 +567,11 @@ function App() {
 
       await loadRazorpayScript();
       const paymentResponse = await openRazorpayCheckout(checkoutData);
-      console.log('Razorpay payment response:', paymentResponse);
+      // Gated: these objects carry razorpay_payment_id, razorpay_order_id and
+      // the signature, which must not land in a production browser console.
+      if (import.meta.env.DEV) {
+        console.log('Razorpay payment response:', paymentResponse);
+      }
 
       // Step 2: once Razorpay returns success, verify the payment signature on the server.
       const verificationResponse = await apiRequest('/api/verify-payment', {
@@ -487,7 +579,9 @@ function App() {
         token,
         body: paymentResponse,
       });
-      console.log('Razorpay verify-payment response:', verificationResponse);
+      if (import.meta.env.DEV) {
+        console.log('Razorpay verify-payment response:', verificationResponse);
+      }
 
       // Step 3: save the actual food orders only after the payment is verified.
       const createdOrders = await apiRequest('/api/save-order', {
@@ -503,6 +597,7 @@ function App() {
       setOrders((current) => [...nextOrders, ...current]);
       setCartItems([]);
       setStudentView('orders');
+      loadRecommendations();
       setPaymentFeedback('Payment successful. Your order has been saved.');
       showMessage(
         nextOrders.length > 1
@@ -542,6 +637,7 @@ function App() {
       setOrders((current) => [...nextOrders, ...current]);
       setCartItems([]);
       setStudentView('orders');
+      loadRecommendations();
       setPaymentFeedback(
         'Cash order booked successfully. Please pay the vendor directly at pickup or delivery.',
       );
@@ -649,7 +745,7 @@ function App() {
       );
       showMessage(`Order status updated to ${status}.`);
     } catch (apiError) {
-      if (apiError.message === 'Canceled orders cannot be updated') {
+      if (apiError.message === 'This order can no longer be updated') {
         return;
       }
 
@@ -671,6 +767,14 @@ function App() {
           quantity: String(item.food) === String(foodId) ? nextQuantity : item.quantity,
         }))
         .filter((item) => item.quantity > 0);
+
+      // The server rejects an empty items array with "Updated order items are
+      // required", so decrementing the last item to zero only ever produced an
+      // error flash. Removing everything is a cancellation.
+      if (!items.length) {
+        await handleCancelStudentOrder(orderId);
+        return;
+      }
 
       const updatedOrder = await apiRequest(`/api/orders/${orderId}`, {
         method: 'PUT',
@@ -721,7 +825,7 @@ function App() {
 
   const handleRateVendor = async (orderId, vendorId, rating) => {
     try {
-      const data = await apiRequest('/api/vendor-reviews', {
+      await apiRequest('/api/vendor-reviews', {
         method: 'POST',
         token,
         body: {
@@ -1070,6 +1174,8 @@ function App() {
           selectedVendorId={selectedStudentVendorId}
           recentlyAddedFoodId={recentlyAddedFoodId}
           menuLoading={menuLoading}
+          recommendations={recommendations}
+          recommendationsLoading={recommendationsLoading}
           onAddToCart={handleAddToCart}
           onToggleBookmark={handleToggleBookmark}
           onClearSelectedVendor={() => setSelectedStudentVendorId('')}

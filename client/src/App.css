@@ -1165,7 +1165,7 @@ textarea:focus {
   justify-content: space-between;
   align-items: center;
   gap: 18px;
-  margin-top: 18px;
+  margin: 0;
   padding: 22px 24px;
   border-radius: 24px;
   border: 1px solid rgba(42, 63, 53, 0.1);
@@ -1875,3 +1875,150 @@ textarea:focus {
     font-size: 1rem;
   }
 }
+
+/* ── Smart Recommendation Section ─────────────────────────────────────────── */
+.recommendations-panel {
+  margin-bottom: 28px;
+  background:
+    radial-gradient(circle at top left, rgba(214, 240, 222, 0.45), transparent 45%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(250, 252, 248, 0.95)),
+    #fffdf8;
+  border: 1px solid rgba(31, 111, 74, 0.18);
+  border-radius: 26px;
+  padding: 24px;
+  box-shadow: 0 16px 36px rgba(31, 111, 74, 0.06);
+}
+
+.recommendations-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.recommendations-header__title {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.recommendations-header__title h3 {
+  margin: 0;
+  font-size: 1.35rem;
+  color: #1f3b2e;
+}
+
+.recommendations-header__title p {
+  margin: 0;
+  color: #556c60;
+  font-size: 0.92rem;
+}
+
+.recommendation-reason-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #1f6f4a;
+  background: rgba(31, 111, 74, 0.08);
+  border: 1px solid rgba(31, 111, 74, 0.14);
+  border-radius: 999px;
+  padding: 3px 10px;
+  margin-top: 2px;
+  width: fit-content;
+}
+
+.recommendation-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 18px;
+}
+
+.recommendation-skeleton-card {
+  min-height: 280px;
+  border-radius: 22px;
+  background: linear-gradient(90deg, rgba(240, 237, 230, 0.8) 25%, rgba(249, 247, 242, 0.9) 50%, rgba(240, 237, 230, 0.8) 75%);
+  background-size: 200% 100%;
+  animation: rec-shimmer 1.6s infinite;
+  border: 1px solid rgba(42, 63, 53, 0.08);
+}
+
+@keyframes rec-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* ── Smart Order Queue & ETA Section ────────────────────────────────── */
+.order-queue-banner {
+  background: #fbf9f4;
+  border: 1px solid rgba(42, 63, 53, 0.12);
+  border-radius: 14px;
+  padding: 12px 16px;
+  margin: 10px 0 14px;
+}
+
+.order-queue-banner--prepared {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #eef7f0;
+  border-color: rgba(31, 111, 74, 0.25);
+  color: #19583b;
+}
+
+.order-queue-banner--prepared .order-queue-banner__icon {
+  font-size: 1.5rem;
+  line-height: 1;
+}
+
+.order-queue-banner--prepared strong {
+  display: block;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #164e32;
+}
+
+.order-queue-banner--prepared p {
+  margin: 2px 0 0;
+  font-size: 0.85rem;
+  color: #276749;
+}
+
+.order-queue-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 10px;
+}
+
+.order-queue-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.order-queue-stat__label {
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: #5c6f64;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.order-queue-stat__val {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #1f3529;
+}
+
+.order-queue-hint {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed rgba(42, 63, 53, 0.1);
+  font-size: 0.8rem;
+  color: #4a6154;
+}
+
+

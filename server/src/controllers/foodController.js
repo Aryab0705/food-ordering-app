@@ -2,6 +2,25 @@ const FoodItem = require('../models/FoodItem');
 const VendorReview = require('../models/VendorReview');
 const asyncHandler = require('../utils/asyncHandler');
 
+// Only these fields may come from the request body. `vendor` in particular must
+// never be client-settable: spreading req.body into the document let a vendor
+// send {"vendor": "<someoneElsesId>"} and move the item onto another menu.
+const EDITABLE_FIELDS = [
+  'name',
+  'description',
+  'category',
+  'price',
+  'imageUrl',
+  'foodType',
+  'isAvailable',
+];
+
+const pickEditableFields = (body = {}) => Object.fromEntries(
+  EDITABLE_FIELDS
+    .filter((field) => body[field] !== undefined)
+    .map((field) => [field, body[field]]),
+);
+
 const getAllFoodItems = asyncHandler(async (req, res) => {
   const foods = await FoodItem.find()
     .populate('vendor', 'name shopName shopAddress averageRating reviewCount')
@@ -63,7 +82,7 @@ const getVendorFoodItems = asyncHandler(async (req, res) => {
 
 const createFoodItem = asyncHandler(async (req, res) => {
   const food = await FoodItem.create({
-    ...req.body,
+    ...pickEditableFields(req.body),
     vendor: req.user._id,
   });
 
@@ -81,7 +100,7 @@ const updateFoodItem = asyncHandler(async (req, res) => {
     throw new Error('Food item not found');
   }
 
-  Object.assign(food, req.body);
+  Object.assign(food, pickEditableFields(req.body));
   await food.save();
 
   res.json(food);

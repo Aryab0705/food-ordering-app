@@ -1,7 +1,11 @@
 require('dotenv').config();
 const app = require('./app');
-const connectDatabase = require('./config/db');
-const { isRazorpayConfigured, hasRealValue } = require('./utils/razorpayClient');
+const {
+  connectDatabase,
+  connectWithRetry,
+  installConnectionMonitoring,
+} = require('./config/db');
+const { isRazorpayConfigured, hasRealValue, getKeyMode } = require('./utils/razorpayClient');
 const { verifyEmailConfig } = require('./utils/sendOtpEmail');
 
 const PORT = process.env.PORT || 5000;
@@ -17,9 +21,17 @@ const validateEnvironment = () => {
 
 const startServer = async () => {
   validateEnvironment();
-  await connectDatabase();
+  installConnectionMonitoring();
 
-  // Start server immediately, validate email config in background
+  // Connect to the database first so requests never hit a 503 race condition on startup.
+  // If the initial connection fails (e.g. network down), start background retries.
+  try {
+    await connectDatabase({ logFailure: true });
+  } catch {
+    console.warn('[MongoDB] Initial connection failed; starting background retries.');
+    connectWithRetry();
+  }
+
   app.listen(PORT, () => {
     console.log(
       hasRealValue(process.env.RAZORPAY_KEY_ID)
@@ -31,6 +43,9 @@ const startServer = async () => {
         ? 'Razorpay Secret loaded'
         : 'Razorpay Secret missing or placeholder',
     );
+    console.log('[Razorpay] Key configured:', hasRealValue(process.env.RAZORPAY_KEY_ID));
+    console.log('[Razorpay] Secret configured:', hasRealValue(process.env.RAZORPAY_KEY_SECRET));
+    console.log('[Razorpay] Key mode:', getKeyMode(process.env.RAZORPAY_KEY_ID));
     console.log(
       isRazorpayConfigured()
         ? 'Razorpay payment integration is ready'

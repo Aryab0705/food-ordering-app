@@ -9,3 +9,6 @@ node_modules/
 dist/
 build/
 .next/
+
+# Vendored Windows Node runtimes used by server/package.json "dev".
+server/node-v*/

@@ -71,6 +71,19 @@ const calculateTotalAmount = (items) => {
   return Number.isFinite(totalAmount) ? totalAmount : NaN;
 };
 
+const isRazorpayAuthenticationError = (error) => (
+  error?.error?.code === 'BAD_REQUEST_ERROR'
+  && /authentication failed/i.test(error?.error?.description || error?.message || '')
+);
+
+const getSafeRazorpayError = (error) => ({
+  name: error?.name,
+  statusCode: error?.statusCode,
+  message: error?.message,
+  code: error?.error?.code,
+  description: error?.error?.description,
+});
+
 const createOrderGroups = (items) =>
   Object.values(
     items.reduce((groups, item) => {
@@ -250,16 +263,30 @@ const createRazorpayOrder = asyncHandler(async (req, res) => {
       itemCount: cartSnapshot.items.length,
     });
   } catch (error) {
-    console.error('Razorpay create-order error:', error);
+    console.error('[Razorpay] create-order failed:', getSafeRazorpayError(error));
+
+    // This 401 comes from Razorpay's API-key authentication, not from the
+    // student's Bearer token. Mapping it to 502 prevents the client from
+    // logging out a valid student session.
+    if (isRazorpayAuthenticationError(error)) {
+      error.message =
+        'Online payment is unavailable because Razorpay rejected the server API keys. '
+        + 'Replace RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET with a matching pair from the same Razorpay account and mode.';
+      error.status = 502;
+      error.statusCode = 502;
+    }
+
     if (!res.statusCode || res.statusCode === 200) {
       res.status(error.statusCode || 500);
     }
 
-    if (error?.error?.description) {
+    // Keep our 502 explanation for Razorpay credential failures. Other API
+    // errors safely return Razorpay's own description to the client.
+    if (!isRazorpayAuthenticationError(error) && error?.error?.description) {
       error.message = error.error.description;
-    } else if (error?.description) {
+    } else if (!isRazorpayAuthenticationError(error) && error?.description) {
       error.message = error.description;
-    } else if (error?.message?.toLowerCase().includes('authentication')) {
+    } else if (!isRazorpayAuthenticationError(error) && error?.message?.toLowerCase().includes('authentication')) {
       error.message =
         'Razorpay rejected the provided keys. Please check that server/.env contains your real test or live Razorpay credentials.';
     }
@@ -293,7 +320,13 @@ const verifyPayment = asyncHandler(async (req, res) => {
       .update(`${orderId}|${paymentId}`)
       .digest('hex');
 
-    if (expectedSignature !== signature) {
+    // Compare fixed-size signatures without leaking where a mismatch occurs.
+    const signaturesMatch = (
+      signature.length === expectedSignature.length
+      && crypto.timingSafeEqual(Buffer.from(expectedSignature), Buffer.from(signature))
+    );
+
+    if (!signaturesMatch) {
       paymentAttempt.status = 'failed';
       paymentAttempt.razorpayPaymentId = paymentId;
       paymentAttempt.razorpaySignature = signature;

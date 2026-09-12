@@ -17,9 +17,19 @@ const protect = asyncHandler(async (req, res, next) => {
     throw new Error('JWT_SECRET is not configured');
   }
 
-  const decoded = jwt.verify(token, process.env.JWT_SECRET);
+  let decoded;
 
-  req.user = await User.findById(decoded.userId).select('-password');
+  try {
+    decoded = jwt.verify(token, process.env.JWT_SECRET);
+  } catch {
+    // An expired or tampered token is a client-side auth problem. Letting
+    // jwt.verify throw uncaught produced a 500, so the browser could never
+    // tell "logged out" apart from "server broken" and never cleared the session.
+    res.status(401);
+    throw new Error('Not authorized, token failed');
+  }
+
+  req.user = await User.findById(decoded.userId).select('-password -loginOtpHash -loginOtpExpiresAt -loginOtpAttempts');
 
   if (!req.user) {
     res.status(401);

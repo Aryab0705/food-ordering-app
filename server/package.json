@@ -5,8 +5,12 @@
   "main": "src/server.js",
   "type": "commonjs",
   "scripts": {
-    "dev": "node --watch src/server.js",
-    "start": "node src/server.js"
+    "dev": "node --tls-max-v1.2 --watch src/server.js",
+    "dev:tls12": "node --tls-max-v1.2 --watch src/server.js",
+    "start": "node --tls-max-v1.2 src/server.js"
+  },
+  "engines": {
+    "node": ">=18"
   },
   "dependencies": {
     "bcryptjs": "^3.0.2",

@@ -27,6 +27,14 @@ const hashOtp = (otp) => crypto.createHash('sha256').update(String(otp)).digest(
 
 const createOtp = () => `${Math.floor(100000 + Math.random() * 900000)}`;
 
+// Local-development escape hatch. When the mail credentials are broken, printing
+// the OTP to the server terminal keeps login usable instead of locking you out of
+// your own app. Refuses to arm in production so a stray env var cannot turn every
+// server log into a list of valid login codes.
+const isDebugOtpEnabled = () => (
+  process.env.AUTH_DEBUG_OTP === 'true' && process.env.NODE_ENV !== 'production'
+);
+
 const saveAndSendOtp = async (user) => {
   const otp = createOtp();
 
@@ -35,15 +43,44 @@ const saveAndSendOtp = async (user) => {
   user.loginOtpAttempts = 0;
   await user.save();
 
-  // Send email in background (fire-and-forget) to prevent blocking login response
-  sendOtpEmail({
-    email: user.email,
-    name: user.name,
-    otp,
-  }).catch((error) => {
+  try {
+    // Awaited deliberately. This used to be fire-and-forget with the rejection
+    // swallowed in a .catch, so the caller always answered "OTP sent to your
+    // email address" even when Gmail had rejected the credentials outright —
+    // leaving you staring at a success banner and an empty inbox.
+    await sendOtpEmail({
+      email: user.email,
+      name: user.name,
+      otp,
+      expiresInMinutes: OTP_EXPIRY_MINUTES,
+    });
+
+    return true;
+  } catch (error) {
     console.error('[auth] Failed to send OTP email:', error.message);
-    // Note: We don't clear the OTP on email failure since the user can request a new one
-  });
+
+    if (isDebugOtpEnabled()) {
+      console.warn(
+        `[auth] AUTH_DEBUG_OTP is on, so the OTP for ${user.email} is ${otp}.`
+        + ' Email delivery failed — type this code to finish logging in.',
+      );
+      return false;
+    }
+
+    // The code is unusable if it never reached the inbox, so don't leave a live
+    // hash in the database that nobody can redeem.
+    user.loginOtpHash = '';
+    user.loginOtpExpiresAt = null;
+    await user.save();
+
+    const deliveryError = new Error(
+      'We could not send your OTP email, so login cannot continue. The email service'
+      + ' rejected the request — check the server terminal for the exact reason.',
+    );
+    // 502, not 500: this server is fine, the upstream mail provider refused.
+    deliveryError.status = 502;
+    throw deliveryError;
+  }
 };
 
 const BOOKMARK_VENDOR_FIELDS = 'name shopName shopAddress averageRating reviewCount';
@@ -148,14 +185,16 @@ const loginUser = asyncHandler(async (req, res) => {
     throw new Error('Invalid email or password');
   }
 
-  await saveAndSendOtp(user);
+  const emailDelivered = await saveAndSendOtp(user);
 
   console.log(`[auth] Login OTP prepared for ${user.email} in ${Date.now() - startedAt}ms`);
 
   res.json({
     requiresOtp: true,
     email: user.email,
-    message: 'OTP sent to your email address',
+    message: emailDelivered
+      ? 'OTP sent to your email address'
+      : 'Email delivery is unavailable — your OTP was printed to the server terminal.',
   });
 });
 
@@ -228,10 +267,12 @@ const resendLoginOtp = asyncHandler(async (req, res) => {
     throw new Error('User not found');
   }
 
-  await saveAndSendOtp(user);
+  const emailDelivered = await saveAndSendOtp(user);
 
   res.json({
-    message: 'A fresh OTP has been sent to your email',
+    message: emailDelivered
+      ? 'A fresh OTP has been sent to your email'
+      : 'Email delivery is unavailable — your OTP was printed to the server terminal.',
   });
 });
 

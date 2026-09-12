@@ -3,6 +3,7 @@ const User = require('../models/User');
 const VendorReview = require('../models/VendorReview');
 const asyncHandler = require('../utils/asyncHandler');
 const { hasTwilioConfig, sendSMS } = require('../utils/sendSMS');
+const { attachQueueToOrders, getOrderQueueDetails } = require('../services/queueService');
 
 const calculateTotalAmount = (items) => {
   return items.reduce(
@@ -129,8 +130,8 @@ const splitLegacyOrder = async (order) => {
 };
 
 const normalizeLegacyOrders = async (query) => {
-  const orders = await Order.find(query);
-  const legacyOrders = orders.filter(
+  const candidateOrders = await Order.find({ ...query, 'items.1': { $exists: true } });
+  const legacyOrders = candidateOrders.filter(
     (order) => new Set(order.items.map((item) => String(item.vendor))).size > 1,
   );
 
@@ -194,12 +195,14 @@ const getStudentOrders = asyncHandler(async (req, res) => {
 
   const orders = await Order.find({ student: req.user._id })
     .populate('items.vendor', 'name shopName shopAddress')
+    .populate('items.food', 'name estimatedPrepTime')
     .sort({ createdAt: -1 });
 
   const sanitizedOrders = orders.map(sanitizeOrder).filter(Boolean);
   const ordersWithRatings = await attachVendorRatings(sanitizedOrders, req.user._id);
+  const ordersWithQueue = await attachQueueToOrders(ordersWithRatings);
 
-  res.json(ordersWithRatings);
+  res.json(ordersWithQueue);
 });
 
 const getVendorOrders = asyncHandler(async (req, res) => {
@@ -404,6 +407,29 @@ const cancelStudentOrder = asyncHandler(async (req, res) => {
   res.json(sanitizeOrder(updatedOrder));
 });
 
+const getOrderQueue = asyncHandler(async (req, res) => {
+  const order = await Order.findOne({
+    _id: req.params.id,
+    student: req.user._id,
+  })
+    .populate('items.vendor', 'name shopName shopAddress')
+    .populate('items.food', 'name estimatedPrepTime');
+
+  if (!order) {
+    res.status(404);
+    throw new Error('Order not found');
+  }
+
+  const queueDetails = await getOrderQueueDetails(null, order);
+
+  res.json({
+    success: true,
+    orderId: order._id,
+    status: order.status,
+    queue: queueDetails,
+  });
+});
+
 module.exports = {
   placeOrder,
   getStudentOrders,
@@ -411,4 +437,5 @@ module.exports = {
   updateOrderStatus,
   updateStudentOrder,
   cancelStudentOrder,
+  getOrderQueue,
 };
