@@ -13,14 +13,31 @@
 
 'use strict';
 
-const nodemailer = require('nodemailer');
+const os = require('os');
 const dns = require('dns');
 
-// Prefer IPv4 to avoid IPv6 egress problems on some hosts. This process-wide
-// setting is all nodemailer needs. The previous `customDnsLookup` helper was
-// handed to createTransport as a `dns` option, which nodemailer does not
-// recognise, so it never ran — it has been removed along with the per-request
-// TCP/DNS probes that added seconds of latency to every single login.
+// Filter os.networkInterfaces only while requiring nodemailer so its internal
+// isFamilySupported(6) check evaluates to false on platforms without IPv6 egress (Render).
+const origNetworkInterfaces = os.networkInterfaces;
+
+os.networkInterfaces = () => {
+  const ifaces = origNetworkInterfaces.call(os);
+  const filtered = {};
+
+  for (const [name, addrs] of Object.entries(ifaces)) {
+    filtered[name] = addrs.filter(
+      (addr) => addr.family === 'IPv4' || addr.family === 4
+    );
+  }
+
+  return filtered;
+};
+
+const nodemailer = require('nodemailer');
+
+// Restore original os.networkInterfaces immediately so no other module is affected
+os.networkInterfaces = origNetworkInterfaces;
+
 if (dns.setDefaultResultOrder) {
   dns.setDefaultResultOrder('ipv4first');
 }
